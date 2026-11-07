@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import yt_dlp
 
+from yt_dlp.networking.impersonate import ImpersonateTarget # Ajout ***Olivier***
+
 from .pcloud import PCloud
 
 AUDIO_FORMAT = os.getenv("AUDIO_FORMAT", "mp3")          # mp3, m4a, opus, flac...
@@ -104,12 +106,7 @@ class JobManager:
                 self._update(job["id"], status="processing", message="Conversion…")
 
         opts = {
-            "impersonate": ImpersonateTarget(
-                     client="firefox",
-                     version="155",
-                     os="windows",
-                     os_version="10"
-                     ),
+            "impersonate": ImpersonateTarget(client="firefox"), # Ajout ***Olivier***
             "outtmpl": os.path.join(workdir, "%(title).180B.%(ext)s"),
             "noplaylist": not job["playlist"],
             "progress_hooks": [hook],
