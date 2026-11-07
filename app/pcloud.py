@@ -1,4 +1,5 @@
-"""Minimal pCloud API client: login, folder creation and streaming upload."""
+"""Minimal pCloud API client: OAuth / login, folder creation and streaming upload."""
+import json
 import os
 import threading
 
@@ -7,6 +8,8 @@ from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncod
 
 # pCloud keeps EU and US accounts on different API hosts.
 HOSTS = {"eu": "eapi.pcloud.com", "us": "api.pcloud.com"}
+# Where the OAuth token obtained through the "Connecter pCloud" button is kept (persistent volume).
+TOKEN_FILE = os.getenv("PCLOUD_TOKEN_FILE", "/data/pcloud.json")
 
 
 class PCloudError(Exception):
@@ -26,13 +29,50 @@ class PCloud:
 
     @classmethod
     def from_env(cls):
+        access_token = os.getenv("PCLOUD_ACCESS_TOKEN")
+        region = os.getenv("PCLOUD_REGION")
+        saved = cls._load_token()
+        if not access_token and saved:
+            access_token = saved.get("access_token")
+            region = region or saved.get("region")
         return cls(
-            region=os.getenv("PCLOUD_REGION"),
+            region=region,
             auth_token=os.getenv("PCLOUD_AUTH_TOKEN"),
-            access_token=os.getenv("PCLOUD_ACCESS_TOKEN"),
+            access_token=access_token,
             username=os.getenv("PCLOUD_USERNAME"),
             password=os.getenv("PCLOUD_PASSWORD"),
         )
+
+    # ----------------------------------------------------------------- oauth
+    @staticmethod
+    def _load_token():
+        try:
+            with open(TOKEN_FILE) as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            return None
+
+    @property
+    def oauth_connected(self):
+        return bool(self.access_token)
+
+    def connect_oauth(self, client_id, client_secret, code, hostname):
+        """Exchange an OAuth code for a permanent access token and keep it."""
+        host = hostname if hostname in HOSTS.values() else HOSTS["eu"]
+        r = requests.post(f"https://{host}/oauth2_token",
+                          data={"client_id": client_id, "client_secret": client_secret, "code": code}, timeout=30)
+        data = r.json()
+        if data.get("result") != 0:
+            raise PCloudError(f"OAuth pCloud: {data.get('result')} {data.get('error')}")
+        region = "us" if host == HOSTS["us"] else "eu"
+        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+        with open(TOKEN_FILE, "w") as fh:
+            json.dump({"access_token": data["access_token"], "region": region, "uid": data.get("uid")}, fh)
+        os.chmod(TOKEN_FILE, 0o600)
+        with self._lock:
+            self.access_token, self.region, self.host = data["access_token"], region, host
+            self.auth_token = None
+            self._folder_cache.clear()
 
     @property
     def configured(self):
@@ -51,14 +91,13 @@ class PCloud:
                 return
             last_error = None
             for host in self._candidate_hosts():
-                params = {"getauth": 1, "logout": 1}
-                headers = {}
+                params, headers = {}, {}
                 if self.access_token:
                     headers["Authorization"] = f"Bearer {self.access_token}"
                 elif self.auth_token:
                     params = {"auth": self.auth_token}
                 else:
-                    params.update(username=self.username, password=self.password)
+                    params = {"getauth": 1, "logout": 1, "username": self.username, "password": self.password}
                 try:
                     r = requests.post(f"https://{host}/userinfo", data=params, headers=headers, timeout=30)
                     data = r.json()
@@ -71,7 +110,10 @@ class PCloud:
                         self.auth_token = data["auth"]
                     return
                 last_error = f"{data.get('result')}: {data.get('error')}"
-            raise PCloudError(f"Connexion pCloud impossible ({last_error})")
+            hint = ""
+            if not (self.access_token or self.auth_token) and last_error and last_error.split(":")[0] in ("1022", "2297"):
+                hint = " — ton compte a la double authentification : utilise le bouton « Connecter pCloud » de la page."
+            raise PCloudError(f"Connexion pCloud impossible ({last_error}){hint}")
 
     def _auth_kwargs(self):
         if self.access_token:

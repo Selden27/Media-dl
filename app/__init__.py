@@ -1,13 +1,20 @@
 import hmac
 import os
+import secrets
+from urllib.parse import urlencode
 
 import jwt
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 
 from .jobs import AUDIO_FOLDER, VIDEO_FOLDER, JobManager
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY") or secrets.token_hex(32)
 manager = JobManager()
+
+PCLOUD_CLIENT_ID = os.getenv("PCLOUD_CLIENT_ID", "")
+PCLOUD_CLIENT_SECRET = os.getenv("PCLOUD_CLIENT_SECRET", "")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 
 API_TOKEN = os.getenv("API_TOKEN", "")
 CF_TEAM = os.getenv("CF_ACCESS_TEAM_DOMAIN", "").strip().rstrip("/")   # e.g. myteam.cloudflareaccess.com
@@ -54,7 +61,38 @@ def health():
 @app.get("/")
 def index():
     return render_template("index.html", audio_folder=AUDIO_FOLDER, video_folder=VIDEO_FOLDER,
-                           pcloud_ok=manager.pcloud.configured)
+                           pcloud_ok=manager.pcloud.configured, pcloud_oauth=manager.pcloud.oauth_connected,
+                           oauth_available=bool(PCLOUD_CLIENT_ID and PCLOUD_CLIENT_SECRET),
+                           pcloud_msg=request.args.get("pcloud"))
+
+
+def _redirect_uri():
+    base = PUBLIC_URL or f"https://{request.host}"
+    return f"{base}{url_for('pcloud_callback')}"
+
+
+@app.get("/pcloud/connect")
+def pcloud_connect():
+    if not (PCLOUD_CLIENT_ID and PCLOUD_CLIENT_SECRET):
+        return "PCLOUD_CLIENT_ID et PCLOUD_CLIENT_SECRET ne sont pas configurés.", 400
+    session["pcloud_state"] = state = secrets.token_urlsafe(16)
+    query = urlencode({"client_id": PCLOUD_CLIENT_ID, "response_type": "code",
+                       "redirect_uri": _redirect_uri(), "state": state})
+    return redirect(f"https://my.pcloud.com/oauth2/authorize?{query}")
+
+
+@app.get("/pcloud/callback")
+def pcloud_callback():
+    if not request.args.get("state") or request.args.get("state") != session.pop("pcloud_state", None):
+        return redirect(url_for("index", pcloud="Échec : requête expirée, recommence."))
+    code = request.args.get("code")
+    if not code:
+        return redirect(url_for("index", pcloud="Échec : autorisation refusée."))
+    try:
+        manager.pcloud.connect_oauth(PCLOUD_CLIENT_ID, PCLOUD_CLIENT_SECRET, code, request.args.get("hostname", ""))
+    except Exception as e:
+        return redirect(url_for("index", pcloud=f"Échec : {e}"))
+    return redirect(url_for("index", pcloud="pCloud est connecté."))
 
 
 @app.post("/api/download")

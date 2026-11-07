@@ -34,13 +34,25 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 .done .bar>i{background:var(--ok)} .error .m{color:var(--err)}
 .badge{font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);margin-left:6px;font-weight:400}
 .empty{color:var(--muted);font-size:14px}
+.note{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:14px}
+.btn{display:inline-block;margin-left:8px;padding:6px 12px;border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600}
 </style>
 </head>
 <body>
 <main>
   <h1>Media DL</h1>
   <p class="sub">Colle un lien audio ou vidéo : il est téléchargé puis rangé dans ton pCloud.</p>
-  {% if not pcloud_ok %}<div class="warn">pCloud n'est pas configuré : ajoute PCLOUD_USERNAME et PCLOUD_PASSWORD (ou PCLOUD_AUTH_TOKEN) dans les variables d'environnement.</div>{% endif %}
+  {% if pcloud_msg %}<div class="note">{{ pcloud_msg }}</div>{% endif %}
+  {% if not pcloud_oauth %}
+  <div class="warn">
+    {% if oauth_available %}
+      Connecte ton compte pCloud (fonctionne avec la double authentification) :
+      <a class="btn" href="pcloud/connect">Connecter pCloud</a>
+    {% elif not pcloud_ok %}
+      pCloud n'est pas configuré : ajoute PCLOUD_CLIENT_ID et PCLOUD_CLIENT_SECRET (recommandé) ou PCLOUD_USERNAME / PCLOUD_PASSWORD.
+    {% endif %}
+  </div>
+  {% endif %}
 
   <form id="f" class="card">
     <label for="url">Lien</label>

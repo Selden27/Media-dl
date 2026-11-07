@@ -16,7 +16,9 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 
 | Variable | Rôle | Défaut |
 |---|---|---|
-| `PCLOUD_USERNAME` / `PCLOUD_PASSWORD` | Identifiants pCloud | — |
+| `PCLOUD_CLIENT_ID` / `PCLOUD_CLIENT_SECRET` | App OAuth pCloud (recommandé, compatible double authentification) : active le bouton « Connecter pCloud » | — |
+| `PUBLIC_URL` | Adresse publique, pour le retour OAuth (ex. `https://dl.mycloudy.fr`) | `https://<host>` |
+| `PCLOUD_USERNAME` / `PCLOUD_PASSWORD` | Identifiants pCloud (comptes sans double authentification) | — |
 | `PCLOUD_AUTH_TOKEN` | Alternative : jeton `auth` pCloud | — |
 | `PCLOUD_ACCESS_TOKEN` | Alternative : jeton OAuth pCloud | — |
 | `PCLOUD_REGION` | `eu` ou `us` (détecté automatiquement si vide) | auto |
@@ -37,6 +39,14 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 Sans `CF_ACCESS_*` ni `API_TOKEN`, l'application est ouverte : mets-la derrière Cloudflare Access.
 Avec `CF_ACCESS_TEAM_DOMAIN` et `CF_ACCESS_AUD`, chaque requête doit porter un jeton Access valide
 (navigateur connecté ou jeton de service), même si quelqu'un contourne Cloudflare.
+
+## Connexion pCloud (OAuth)
+
+1. Sur https://docs.pcloud.com/my_apps/ crée une application, avec comme Redirect URI
+   `https://dl.mycloudy.fr/pcloud/callback`.
+2. Mets son Client ID et son Client Secret dans `PCLOUD_CLIENT_ID` / `PCLOUD_CLIENT_SECRET`.
+3. Ouvre l'application et clique sur « Connecter pCloud ». Le jeton (sans expiration) est gardé dans
+   `/data/pcloud.json` : monte un volume persistant sur `/data`.
 
 ## API (raccourci iOS, n8n…)
 
