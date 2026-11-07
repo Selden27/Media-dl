@@ -104,6 +104,12 @@ class JobManager:
                 self._update(job["id"], status="processing", message="Conversion…")
 
         opts = {
+            "impersonate": ImpersonateTarget(
+                     client="firefox",
+                     version="155",
+                     os="windows",
+                     os_version="10"
+                     ),
             "outtmpl": os.path.join(workdir, "%(title).180B.%(ext)s"),
             "noplaylist": not job["playlist"],
             "progress_hooks": [hook],
@@ -117,7 +123,6 @@ class JobManager:
             "retries": 5,
             "fragment_retries": 5,
             "concurrent_fragment_downloads": 4,
-            "impersonate": "firefox",
         }
         if PROXY:
             opts["proxy"] = PROXY
