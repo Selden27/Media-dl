@@ -18,6 +18,7 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 |---|---|---|
 | `PCLOUD_CLIENT_ID` / `PCLOUD_CLIENT_SECRET` | App OAuth pCloud (recommandé, compatible double authentification) : active le bouton « Connecter pCloud » | — |
 | `PUBLIC_URL` | Adresse publique, pour le retour OAuth (ex. `https://dl.mycloudy.fr`) | `https://<host>` |
+| `PCLOUD_ACCESS_TOKEN` | Jeton pCloud (voir « Connexion pCloud par jeton ») | — |
 | `PCLOUD_USERNAME` / `PCLOUD_PASSWORD` | Identifiants pCloud (comptes sans double authentification) | — |
 | `PCLOUD_AUTH_TOKEN` | Alternative : jeton `auth` pCloud | — |
 | `PCLOUD_ACCESS_TOKEN` | Alternative : jeton OAuth pCloud | — |
@@ -40,7 +41,17 @@ Sans `CF_ACCESS_*` ni `API_TOKEN`, l'application est ouverte : mets-la derrière
 Avec `CF_ACCESS_TEAM_DOMAIN` et `CF_ACCESS_AUD`, chaque requête doit porter un jeton Access valide
 (navigateur connecté ou jeton de service), même si quelqu'un contourne Cloudflare.
 
-## Connexion pCloud (OAuth)
+## Connexion pCloud par jeton (le plus simple)
+
+La connexion par e-mail / mot de passe depuis le serveur peut être refusée par pCloud
+(erreur 1022 « Please provide 'code' » : vérification de nouvel appareil ou double authentification).
+Pour l'éviter, utilise un jeton :
+
+1. Installe [rclone](https://rclone.org/downloads/) sur ton ordinateur et lance `rclone authorize "pcloud"`.
+2. Connecte-toi à pCloud dans le navigateur qui s'ouvre, puis autorise l'accès.
+3. Copie la valeur `access_token` affichée et mets-la dans `PCLOUD_ACCESS_TOKEN`. Redéploie.
+
+## Connexion pCloud (OAuth, avec ta propre application pCloud)
 
 1. Sur https://docs.pcloud.com/my_apps/ crée une application, avec comme Redirect URI
    `https://dl.mycloudy.fr/pcloud/callback`.

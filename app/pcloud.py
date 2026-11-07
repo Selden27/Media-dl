@@ -112,7 +112,8 @@ class PCloud:
                 last_error = f"{data.get('result')}: {data.get('error')}"
             hint = ""
             if not (self.access_token or self.auth_token) and last_error and last_error.split(":")[0] in ("1022", "2297"):
-                hint = " — ton compte a la double authentification : utilise le bouton « Connecter pCloud » de la page."
+                hint = (" — pCloud demande un code de vérification pour cette connexion (nouvel appareil ou 2FA)."
+                        " Utilise plutôt un jeton : PCLOUD_ACCESS_TOKEN (voir README, « rclone authorize pcloud »).")
             raise PCloudError(f"Connexion pCloud impossible ({last_error}){hint}")
 
     def _auth_kwargs(self):
