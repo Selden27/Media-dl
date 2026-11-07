@@ -20,6 +20,7 @@ VIDEO_FOLDER = os.getenv("PCLOUD_VIDEO_FOLDER", "/Videos")
 WORK_DIR = os.getenv("WORK_DIR", tempfile.gettempdir())
 MAX_JOBS_KEPT = int(os.getenv("MAX_JOBS_KEPT", "100"))
 COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "")
+PROXY = os.getenv("YTDLP_PROXY", "")  # e.g. socks5h://warp:1080 (used for downloads only, not pCloud)
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 SKIP_EXT = IMAGE_EXT | {".part", ".ytdl", ".json", ".vtt", ".srt"}
@@ -117,6 +118,8 @@ class JobManager:
             "fragment_retries": 5,
             "concurrent_fragment_downloads": 4,
         }
+        if PROXY:
+            opts["proxy"] = PROXY
         if COOKIES_FILE and os.path.exists(COOKIES_FILE):
             opts["cookiefile"] = COOKIES_FILE
 

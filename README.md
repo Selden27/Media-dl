@@ -27,6 +27,7 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 | `VIDEO_MAX_HEIGHT` | Limite de résolution, ex. `1080` | meilleure |
 | `MAX_CONCURRENT` | Téléchargements simultanés | `2` |
 | `YTDLP_COOKIES` | Contenu d'un fichier cookies (format Netscape), utile si YouTube bloque le serveur (« not a bot ») | — |
+| `YTDLP_PROXY` | Proxy pour les téléchargements (ex. `socks5h://warp:1080`), si les sites bloquent l'IP du serveur. pCloud n'y passe pas | — |
 | `YTDLP_AUTO_UPDATE` | Mettre yt-dlp à jour au démarrage | `true` |
 | `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | Vérifie le jeton Cloudflare Access (recommandé) | — |
 | `API_TOKEN` | Jeton alternatif (`Authorization: Bearer …`) | — |
@@ -49,3 +50,10 @@ Derrière Cloudflare Access avec un jeton de service, ajouter les en-têtes
 `CF-Access-Client-Id` et `CF-Access-Client-Secret`.
 
 La page accepte aussi `/?url=<lien>&mode=video` pour préremplir le formulaire.
+
+## Si un site bloque l'IP du serveur
+
+Bandcamp, YouTube… bloquent souvent les IP de datacenter (« Client Challenge », « not a bot »).
+Le fichier `warp/docker-compose.yml` lance un proxy Cloudflare WARP gratuit : déploie-le comme
+service Coolify (avec « Connect to Predefined Network » activé), puis mets
+`YTDLP_PROXY=socks5h://<nom-du-conteneur-warp>:1080` dans l'application.
