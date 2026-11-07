@@ -54,19 +54,19 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
   </div>
   {% endif %}
 
-  <form id="f" class="card">
+  <form id="f" class="card" autocomplete="off">
     <label for="url">Lien</label>
     <input id="url" name="url" type="url" required placeholder="https://…" autocomplete="off">
     <label>Format</label>
     <div class="row">
       <div class="seg">
-        <input type="radio" name="mode" id="m-a" value="audio" checked><label for="m-a">Audio</label>
-        <input type="radio" name="mode" id="m-v" value="video"><label for="m-v">Vidéo (MP4)</label>
+        <input type="radio" name="mode" id="m-a" value="audio" checked autocomplete="off"><label for="m-a">Audio</label>
+        <input type="radio" name="mode" id="m-v" value="video" autocomplete="off"><label for="m-v">Vidéo (MP4)</label>
       </div>
-      <label class="check"><input type="checkbox" name="playlist" id="playlist"> Playlist entière</label>
+      <label class="check"><input type="checkbox" name="playlist" id="playlist" autocomplete="off"> Playlist entière</label>
     </div>
     <label for="folder">Dossier pCloud</label>
-    <input id="folder" name="folder" type="text" value="{{ audio_folder }}">
+    <input id="folder" name="folder" type="text" value="{{ audio_folder }}" autocomplete="off">
     <div class="row" style="margin-top:14px"><button id="go" type="submit">Télécharger</button></div>
   </form>
 
@@ -77,13 +77,34 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 const folders = {audio: {{ audio_folder|tojson }}, video: {{ video_folder|tojson }}};
 const $ = s => document.querySelector(s);
 const folder = $('#folder');
-let touched = false;
-folder.addEventListener('input', () => touched = true);
-document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', e => { if (!touched) folder.value = folders[e.target.value]; }));
+const currentMode = () => $('#m-v').checked ? 'video' : 'audio';
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
 
-const qs = new URLSearchParams(location.search);
-if (qs.get('url')) $('#url').value = qs.get('url');
-if (qs.get('mode') === 'video') { $('#m-v').checked = true; folder.value = folders.video; }
+// Show a mode and keep the folder in step with it. A folder the user typed by hand
+// (anything other than the two defaults) is left alone.
+function setMode(mode) {
+  mode = mode === 'video' ? 'video' : 'audio';
+  $('#m-a').checked = mode === 'audio';
+  $('#m-v').checked = mode === 'video';
+  const v = folder.value.trim();
+  if (!v || v === folders.audio || v === folders.video) folder.value = folders[mode];
+  store.set('mode', mode);
+}
+
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => setMode(currentMode())));
+
+// Initial state: ?mode= in the link, else this device's last choice, else audio.
+// Done on every pageshow too, because browsers (Safari iOS, Firefox) restore old form
+// values from cache without firing change events, which left mode and folder out of step.
+function initForm() {
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('url')) $('#url').value = qs.get('url');
+  setMode(qs.get('mode') || store.get('mode') || 'audio');
+}
+window.addEventListener('pageshow', initForm);
 
 $('#f').addEventListener('submit', async e => {
   e.preventDefault();
