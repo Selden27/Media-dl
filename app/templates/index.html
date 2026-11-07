@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Media DL</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#16181d;--muted:#667085;--line:#e4e7ec;--accent:#4f46e5;--ok:#12805c;--err:#c0362c}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--text:#e8eaf0;--muted:#98a2b3;--line:#2a2f3a;--accent:#818cf8;--ok:#34d399;--err:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+input[type=url],input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg input{display:none}
+.seg label{margin:0;padding:8px 14px;cursor:pointer;color:var(--text);font-size:14px}
+.seg input:checked+label{background:var(--accent);color:#fff}
+.check{display:flex;gap:6px;align-items:center;margin:0;color:var(--text);font-size:14px}
+button{padding:10px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:400;padding:6px 10px;font-size:13px}
+button:disabled{opacity:.6}
+.warn{background:#fef3c7;color:#7c2d12;border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:14px}
+h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;align-items:center}
+.job{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:8px}
+.job .t{font-weight:600;word-break:break-word}
+.job .m{color:var(--muted);font-size:13px;word-break:break-word}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);transition:width .4s}
+.done .bar>i{background:var(--ok)} .error .m{color:var(--err)}
+.badge{font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);margin-left:6px;font-weight:400}
+.empty{color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Media DL</h1>
+  <p class="sub">Colle un lien audio ou vidéo : il est téléchargé puis rangé dans ton pCloud.</p>
+  {% if not pcloud_ok %}<div class="warn">pCloud n'est pas configuré : ajoute PCLOUD_USERNAME et PCLOUD_PASSWORD (ou PCLOUD_AUTH_TOKEN) dans les variables d'environnement.</div>{% endif %}
+
+  <form id="f" class="card">
+    <label for="url">Lien</label>
+    <input id="url" name="url" type="url" required placeholder="https://…" autocomplete="off">
+    <label>Format</label>
+    <div class="row">
+      <div class="seg">
+        <input type="radio" name="mode" id="m-a" value="audio" checked><label for="m-a">Audio</label>
+        <input type="radio" name="mode" id="m-v" value="video"><label for="m-v">Vidéo (MP4)</label>
+      </div>
+      <label class="check"><input type="checkbox" name="playlist" id="playlist"> Playlist entière</label>
+    </div>
+    <label for="folder">Dossier pCloud</label>
+    <input id="folder" name="folder" type="text" value="{{ audio_folder }}">
+    <div class="row" style="margin-top:14px"><button id="go" type="submit">Télécharger</button></div>
+  </form>
+
+  <h2>Téléchargements <button class="ghost" id="clear" type="button">Effacer les terminés</button></h2>
+  <div id="jobs"><p class="empty">Aucun téléchargement pour l'instant.</p></div>
+</main>
+<script>
+const folders = {audio: {{ audio_folder|tojson }}, video: {{ video_folder|tojson }}};
+const $ = s => document.querySelector(s);
+const folder = $('#folder');
+let touched = false;
+folder.addEventListener('input', () => touched = true);
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', e => { if (!touched) folder.value = folders[e.target.value]; }));
+
+const qs = new URLSearchParams(location.search);
+if (qs.get('url')) $('#url').value = qs.get('url');
+if (qs.get('mode') === 'video') { $('#m-v').checked = true; folder.value = folders.video; }
+
+$('#f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('#go'); btn.disabled = true;
+  const body = {url: $('#url').value.trim(), mode: document.querySelector('input[name=mode]:checked').value,
+                playlist: $('#playlist').checked, folder: folder.value};
+  try {
+    const r = await fetch('api/download', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    $('#url').value = '';
+    refresh();
+  } catch (err) { alert('Erreur : ' + err.message); }
+  btn.disabled = false;
+});
+$('#clear').addEventListener('click', async () => { await fetch('api/jobs/clear', {method: 'POST'}); refresh(); });
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const label = {queued:'en attente', downloading:'téléchargement', processing:'conversion', uploading:'envoi pCloud', done:'terminé', error:'erreur'};
+async function refresh() {
+  try {
+    const jobs = await (await fetch('api/jobs')).json();
+    $('#jobs').innerHTML = jobs.length ? jobs.map(j => `
+      <div class="job ${j.status}">
+        <div class="t">${esc(j.title || j.url)}<span class="badge">${j.mode === 'video' ? 'vidéo' : 'audio'}</span><span class="badge">${label[j.status] || j.status}</span></div>
+        <div class="m">${esc(j.error || j.message)}</div>
+        ${j.files.length ? `<div class="m">${j.files.map(f => esc(f.path)).join('<br>')}</div>` : ''}
+        <div class="bar"><i style="width:${j.status === 'done' ? 100 : j.progress}%"></i></div>
+      </div>`).join('') : '<p class="empty">Aucun téléchargement pour l\'instant.</p>';
+  } catch (e) {}
+}
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
