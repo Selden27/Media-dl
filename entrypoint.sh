@@ -2,7 +2,7 @@
 set -e
 # Sites change often: keep yt-dlp current on each start (disable with YTDLP_AUTO_UPDATE=false).
 if [ "$YTDLP_AUTO_UPDATE" = "true" ]; then
-  pip install --no-cache-dir -q -U "yt-dlp[default]" || echo "yt-dlp update failed, keeping bundled version"
+  pip install --no-cache-dir -q -U "yt-dlp[default,curl-cffi]" || echo "yt-dlp update failed, keeping bundled version"
 fi
 # Optional cookies (Netscape format) for sites that require a login or block bots.
 if [ -n "$YTDLP_COOKIES" ]; then
