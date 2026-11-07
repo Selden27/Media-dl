@@ -117,6 +117,7 @@ class JobManager:
             "retries": 5,
             "fragment_retries": 5,
             "concurrent_fragment_downloads": 4,
+            "impersonate": "firefox",
         }
         if PROXY:
             opts["proxy"] = PROXY
