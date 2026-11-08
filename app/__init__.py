@@ -95,14 +95,40 @@ def pcloud_callback():
     return redirect(url_for("index", pcloud="pCloud est connecté."))
 
 
+def _request_fields():
+    """Read the request whatever way a client sends it: JSON, form, query string or a bare URL body."""
+    data = {}
+    data.update(request.args.to_dict())
+    data.update(request.form.to_dict())
+    body = request.get_json(silent=True)
+    if isinstance(body, dict):
+        data.update(body)
+    elif isinstance(body, str):
+        data.setdefault("url", body)
+    if not data.get("url") and not data.get("link"):
+        raw = request.get_data(as_text=True).strip()
+        if raw.startswith(("http://", "https://")):
+            data["url"] = raw
+    return data
+
+
+def _mode_from(data):
+    """Accept mode, format or type, with values like audio/mp3/m4a or video/mp4."""
+    value = str(data.get("mode") or data.get("format") or data.get("type") or "audio").lower()
+    return "video" if value in ("video", "mp4", "vidéo", "webm", "mkv") else "audio"
+
+
 @app.post("/api/download")
+@app.route("/download", methods=["GET", "POST"])  # older iOS shortcut
 def download():
-    data = request.get_json(silent=True) or request.form
-    url = (data.get("url") or "").strip()
+    data = _request_fields()
+    url = str(data.get("url") or data.get("link") or "").strip()
     if not url.startswith(("http://", "https://")):
+        app.logger.warning("download refused: no valid URL (fields received: %s)", sorted(data))
         return jsonify(error="Lien invalide"), 400
     playlist = str(data.get("playlist", "")).lower() in ("1", "true", "on", "yes")
-    job = manager.submit(url, mode=data.get("mode", "audio"), playlist=playlist, folder=data.get("folder"))
+    job = manager.submit(url, mode=_mode_from(data), playlist=playlist, folder=data.get("folder"))
+    app.logger.info("download queued via %s: job %s (%s)", request.path, job["id"], job["mode"])
     return jsonify(job), 202
 
 
