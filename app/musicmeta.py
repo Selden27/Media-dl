@@ -133,9 +133,23 @@ def hints_from_info(info):
         "duration": info.get("duration"),
         "genres": genres,
         "from_site": from_site,
+        "official": _official_source(info),
+        "track_number": info.get("track_number"),
+        "album_artist": (info.get("album_artist") or "").strip(),
         "description": info.get("description") or "",
         "url": info.get("webpage_url") or info.get("original_url") or "",
     }
+
+
+def _official_source(info):
+    """Metadata published by the artist or label themselves: Bandcamp pages, YouTube Music
+    auto-generated tracks ("Provided to YouTube by …"), SoundCloud tracks with an album."""
+    key = (info.get("extractor_key") or info.get("ie_key") or "").lower()
+    if key.startswith("bandcamp"):
+        return True
+    if key.startswith("youtube") and "provided to youtube by" in (info.get("description") or "").lower():
+        return True
+    return False
 
 
 # ------------------------------------------------------------- musicbrainz
@@ -409,9 +423,18 @@ def identify(info, library, path=None, auto_confidence=0.85):
         best = fp + ("MusicBrainz + AcoustID",)
     if best:
         _apply_musicbrainz(tags, best[0], best[1], best[2], votes, h, *(best[3:] or ("MusicBrainz",)))
-    elif h["from_site"]:
-        # The site gave artist + track itself (YouTube Music, SoundCloud): fairly reliable.
-        tags["confidence"] = 0.7 if h["album"] else 0.6
+    if h["from_site"] and tags["confidence"] < 0.88:
+        # The site gave artist + track itself. From the artist's / label's own page with an
+        # album (Bandcamp, YouTube Music), that is the official metadata: file it automatically.
+        site_conf = 0.88 if (h["official"] and h["album"]) else 0.7 if h["album"] else 0.6
+        if site_conf > tags["confidence"]:
+            tags.update(title=h["title"], artist=h["artist"], album=h["album"] or None,
+                        albumartist=h["album_artist"] or h["artist"], track=h["track_number"],
+                        year=str(h["year"]) if h["year"] else None, source="site officiel" if h["official"] else "site",
+                        confidence=site_conf)
+            for k in ("release_id", "release_group_id", "recording_id", "total_tracks", "disc", "total_discs",
+                      "date", "original_date", "release_type", "track_id", "isrc", "compilation"):
+                tags.pop(k, None)
 
     discogs_rel = None
     if tags["confidence"] < auto_confidence:
