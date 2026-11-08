@@ -1,0 +1,46 @@
+# One genre per line. Lines starting with # are ignored.
+# Olivier's genres
+Ambient
+Ecstatic Dance
+Experimental
+Mantra
+Medicine Music
+Meditation
+Meditative
+# Sacred / devotional
+Kirtan
+Devotional
+Chant
+Shamanic
+Sound Healing
+# Instruments
+Handpan
+Piano
+Neo-Classical
+Acoustic
+# Organic dance / electronic
+Organic House
+Downtempo
+Tribal
+World Electronica
+Chillout
+# Calm
+New Age
+Nature Sounds
+Sleep
+Yoga
+# Roots
+World
+Folk
+Afro
+Latin
+Celtic
+# General
+Pop
+Rock
+Electronic
+Hip-Hop
+Jazz
+Classical
+Soundtrack
+Chanson française

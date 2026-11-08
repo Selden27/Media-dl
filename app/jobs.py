@@ -12,6 +12,8 @@ import yt_dlp
 
 from yt_dlp.networking.impersonate import ImpersonateTarget # Ajout ***Olivier***
 
+from . import musicmeta, tagging
+from .library import Library
 from .pcloud import PCloud
 
 AUDIO_FORMAT = os.getenv("AUDIO_FORMAT", "mp3")          # mp3, m4a, opus, flac...
@@ -22,7 +24,9 @@ VIDEO_FOLDER = os.getenv("PCLOUD_VIDEO_FOLDER", "/Videos")
 WORK_DIR = os.getenv("WORK_DIR", tempfile.gettempdir())
 MAX_JOBS_KEPT = int(os.getenv("MAX_JOBS_KEPT", "100"))
 COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "")
-PROXY = os.getenv("YTDLP_PROXY", "")  # e.g. socks5h://warp:1080 (used for downloads only, not pCloud)
+PROXY = os.getenv("YTDLP_PROXY", "")
+MUSIC_TAGGING = os.getenv("MUSIC_TAGGING", "true").lower() == "true"   # identify + tag + file MP3s
+AUTO_CONFIDENCE = float(os.getenv("MUSIC_AUTO_CONFIDENCE", "0.85"))    # below: goes to "_A trier"  # e.g. socks5h://warp:1080 (used for downloads only, not pCloud)
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 SKIP_EXT = IMAGE_EXT | {".part", ".ytdl", ".json", ".vtt", ".srt"}
@@ -39,6 +43,7 @@ class JobManager:
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=int(os.getenv("MAX_CONCURRENT", "2")))
         self.pcloud = PCloud.from_env()
+        self.library = Library()
 
     # -------------------------------------------------------------- public
     def submit(self, url, mode="audio", playlist=False, folder=None):
@@ -126,7 +131,13 @@ class JobManager:
         if COOKIES_FILE and os.path.exists(COOKIES_FILE):
             opts["cookiefile"] = COOKIES_FILE
 
-        if job["mode"] == "audio":
+        if job["mode"] == "audio" and self._tagging(job):
+            # Tags and cover are written afterwards by tagging.write_tags; keep the thumbnail file.
+            opts["format"] = "bestaudio/best"
+            opts["postprocessors"] = [
+                {"key": "FFmpegExtractAudio", "preferredcodec": AUDIO_FORMAT, "preferredquality": AUDIO_QUALITY},
+            ]
+        elif job["mode"] == "audio":
             opts["format"] = "bestaudio/best"
             opts["postprocessors"] = [
                 {"key": "FFmpegExtractAudio", "preferredcodec": AUDIO_FORMAT, "preferredquality": AUDIO_QUALITY},
@@ -142,6 +153,65 @@ class JobManager:
                 {"key": "EmbedThumbnail"},
             ]
         return opts
+
+    @staticmethod
+    def _tagging(job):
+        return MUSIC_TAGGING and job["mode"] == "audio" and AUDIO_FORMAT == "mp3"
+
+    @staticmethod
+    def _downloaded(info):
+        """[(final file path, entry info, thumbnail path)] for every item yt-dlp produced."""
+        entries = info.get("entries") if info.get("_type") == "playlist" else [info]
+        out = []
+        for e in entries or []:
+            if not e:
+                continue
+            thumb = next((t["filepath"] for t in reversed(e.get("thumbnails") or [])
+                          if t.get("filepath") and os.path.exists(t["filepath"])), None)
+            for rd in e.get("requested_downloads") or []:
+                if rd.get("filepath") and os.path.exists(rd["filepath"]):
+                    out.append((rd["filepath"], e, thumb))
+        return out
+
+    def _tag_and_upload(self, job_id, job, items):
+        n = len(items)
+        tag_list = []
+        for i, (path, entry, thumb) in enumerate(items, 1):
+            label = f"({i}/{n}) " if n > 1 else ""
+            self._update(job_id, status="processing", progress=round((i - 1) / n * 100, 1),
+                         message=f"{label}Recherche des tags…")
+            try:
+                t = musicmeta.identify(entry, self.library)
+            except Exception as e:  # MusicBrainz down, unexpected data…: keep what the site gave
+                h = musicmeta.hints_from_info(entry)
+                t = {"title": h["title"], "artist": h["artist"], "albumartist": h["artist"], "url": h["url"],
+                     "confidence": 0.0, "genre": None, "cover": None, "tag_error": str(e)[:200]}
+            tag_list.append(t)
+        if n > 1:
+            try:
+                musicmeta.align_to_release(tag_list, AUTO_CONFIDENCE)
+            except Exception:
+                pass
+
+        uploaded = []
+        for i, ((path, entry, thumb), t) in enumerate(zip(items, tag_list), 1):
+            label = f"({i}/{n}) " if n > 1 else ""
+            if not t.get("cover") and thumb:
+                t["cover"], t["cover_source"] = musicmeta.thumbnail_cover(thumb), "miniature"
+            auto_ok = t["confidence"] >= AUTO_CONFIDENCE
+            tagging.write_tags(path, t)
+            folder, name = tagging.target_path(t, job["folder"], auto_ok)
+            final = os.path.join(os.path.dirname(path), f"up-{i}", name)
+            os.makedirs(os.path.dirname(final), exist_ok=True)
+            os.replace(path, final)
+            self._update(job_id, status="uploading", progress=0, message=f"{label}Envoi vers pCloud : {name}")
+            res = self.pcloud.upload(final, folder, on_progress=lambda p: self._update(job_id, progress=round(p, 1)))
+            res.update(confidence=round(t["confidence"], 2), genre=t.get("genre"), to_sort=not auto_ok,
+                       album=t.get("album"), cover=t.get("cover_source"))
+            uploaded.append(res)
+            os.remove(final)
+            self._update(job_id, files=list(uploaded))
+        return uploaded
 
     def _run(self, job_id):
         job = self.get(job_id)
@@ -159,6 +229,18 @@ class JobManager:
             if info.get("_type") == "playlist":
                 target = f"{target}/{_safe_folder(title)}"
             self._update(job_id, title=title)
+
+            if self._tagging(job):
+                items = self._downloaded(info)
+                if not items:
+                    raise RuntimeError("Le téléchargement n'a produit aucun fichier.")
+                uploaded = self._tag_and_upload(job_id, job, items)
+                to_sort = sum(1 for f in uploaded if f["to_sort"])
+                msg = f"{len(uploaded)} fichier(s) rangé(s)"
+                if to_sort:
+                    msg += f", dont {to_sort} dans « {tagging.TO_SORT_FOLDER} » (à vérifier)"
+                self._update(job_id, status="done", progress=100, finished=time.time(), message=msg)
+                return
 
             files = sorted(
                 os.path.join(workdir, f) for f in os.listdir(workdir)

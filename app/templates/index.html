@@ -34,6 +34,8 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 .done .bar>i{background:var(--ok)} .error .m{color:var(--err)}
 .badge{font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);margin-left:6px;font-weight:400}
 .empty{color:var(--muted);font-size:14px}
+.badge.sort{border-color:#d97706;color:#d97706}
+.dim{opacity:.75}
 .note{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:14px}
 .btn{display:inline-block;margin-left:8px;padding:6px 12px;border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600}
 </style>
@@ -124,6 +126,14 @@ $('#clear').addEventListener('click', async () => { await fetch('api/jobs/clear'
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const label = {queued:'en attente', downloading:'téléchargement', processing:'conversion', uploading:'envoi pCloud', done:'terminé', error:'erreur'};
+function fileLine(f) {
+  let extra = [];
+  if (f.genre) extra.push(esc(f.genre));
+  if (f.confidence !== undefined) extra.push('confiance ' + Math.round(f.confidence * 100) + ' %');
+  if (f.cover === 'miniature') extra.push('pochette : miniature');
+  const sort = f.to_sort ? '<span class="badge sort">à trier</span>' : '';
+  return esc(f.path) + sort + (extra.length ? ` <span class="dim">· ${extra.join(' · ')}</span>` : '');
+}
 async function refresh() {
   try {
     const jobs = await (await fetch('api/jobs')).json();
@@ -131,7 +141,7 @@ async function refresh() {
       <div class="job ${j.status}">
         <div class="t">${esc(j.title || j.url)}<span class="badge">${j.mode === 'video' ? 'vidéo' : 'audio'}</span><span class="badge">${label[j.status] || j.status}</span></div>
         <div class="m">${esc(j.error || j.message)}</div>
-        ${j.files.length ? `<div class="m">${j.files.map(f => esc(f.path)).join('<br>')}</div>` : ''}
+        ${j.files.length ? `<div class="m">${j.files.map(fileLine).join('<br>')}</div>` : ''}
         <div class="bar"><i style="width:${j.status === 'done' ? 100 : j.progress}%"></i></div>
       </div>`).join('') : '<p class="empty">Aucun téléchargement pour l\'instant.</p>';
   } catch (e) {}

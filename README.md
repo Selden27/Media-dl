@@ -8,6 +8,14 @@ Petite application web qui télécharge n'importe quel lien audio ou vidéo (You
 - Envoi vers pCloud en streaming (pas de limite de taille liée à la mémoire), fichiers locaux supprimés après envoi.
 - yt-dlp mis à jour automatiquement à chaque démarrage du conteneur.
 
+## Tags musicaux (audio)
+
+Chaque MP3 est identifié sur MusicBrainz (titre, artiste, album, n° de piste, année, label, ISRC), reçoit sa
+pochette officielle (Cover Art Archive, sinon la miniature recadrée en carré) et un genre unique choisi dans
+`app/data/genres.txt` (correspondances dans `app/data/genre_map.txt`). Tags écrits en ID3v2.3.
+Si la confiance est suffisante, le fichier est rangé selon `MUSIC_PATH_TEMPLATE` ; sinon il part dans `_A trier`.
+Réglages persistants : `/data/library.json`. Plan complet : [docs/tags-plan.md](docs/tags-plan.md).
+
 ## Déploiement (Coolify)
 
 Application « Public repository », build pack **Dockerfile**, port **8000**.
@@ -32,6 +40,10 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 | `YTDLP_COOKIES` | Contenu d'un fichier cookies (format Netscape), utile si YouTube bloque le serveur (« not a bot ») | — |
 | `YTDLP_PROXY` | Proxy pour les téléchargements (ex. `socks5h://warp:1080`), si les sites bloquent l'IP du serveur. pCloud n'y passe pas | — |
 | `YTDLP_AUTO_UPDATE` | Mettre yt-dlp à jour au démarrage | `true` |
+| `MUSIC_TAGGING` | Identifier les morceaux audio (MusicBrainz), écrire les tags et ranger selon le modèle | `true` |
+| `MUSIC_PATH_TEMPLATE` | Modèle de chemin sous le dossier audio | `%albumartist%/%album%/$num(%track%,2) - %title%` |
+| `MUSIC_AUTO_CONFIDENCE` | Confiance minimale pour ranger automatiquement (sinon `_A trier`) | `0.85` |
+| `MUSIC_SINGLES_FOLDER` / `MUSIC_TO_SORT_FOLDER` | Noms des dossiers « sans album » et « à vérifier » | `Singles` / `_A trier` |
 | `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | Vérifie le jeton Cloudflare Access (recommandé) | — |
 | `API_TOKEN` | Jeton alternatif (`Authorization: Bearer …`) | — |
 

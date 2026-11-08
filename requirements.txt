@@ -4,3 +4,5 @@ requests[socks]==2.32.5
 requests-toolbelt==1.0.0
 pyjwt[crypto]==2.10.1
 yt-dlp[default,curl-cffi]==2026.10.26
+mutagen==1.47.0
+pillow==11.3.0
