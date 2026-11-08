@@ -15,7 +15,7 @@ import yt_dlp
 
 from yt_dlp.networking.impersonate import ImpersonateTarget # Ajout ***Olivier***
 
-from . import musicmeta, sources, tagging
+from . import lyrics, musicmeta, sources, tagging
 from .cleanup import Cleanup
 from .library import Library
 from .review import EDITABLE, ReviewStore
@@ -33,7 +33,9 @@ JOBS_COVER_DIR = os.getenv("JOBS_COVER_DIR", "/data/jobs")  # one small cover pe
 COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "")
 PROXY = os.getenv("YTDLP_PROXY", "")
 MUSIC_TAGGING = os.getenv("MUSIC_TAGGING", "true").lower() == "true"   # identify + tag + file MP3s
-AUTO_CONFIDENCE = float(os.getenv("MUSIC_AUTO_CONFIDENCE", "0.85"))    # below: goes to "_A trier"  # e.g. socks5h://warp:1080 (used for downloads only, not pCloud)
+AUTO_CONFIDENCE = float(os.getenv("MUSIC_AUTO_CONFIDENCE", "0.85"))    # below: goes to "_A trier"
+FOLDER_COVER = os.getenv("MUSIC_FOLDER_COVER", "true").lower() == "true"  # cover.jpg in each album folder
+DUPLICATE_POLICIES = ("skip", "replace", "keep")  # e.g. socks5h://warp:1080 (used for downloads only, not pCloud)
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
 SKIP_EXT = IMAGE_EXT | {".part", ".ytdl", ".json", ".vtt", ".srt"}
@@ -121,7 +123,7 @@ class JobManager:
             sources.log.warning("sources de tags : test impossible (%s)", e)
 
     # -------------------------------------------------------------- public
-    def submit(self, url, mode="audio", playlist=False, folder=None):
+    def submit(self, url, mode="audio", playlist=False, folder=None, duplicates="skip"):
         mode = "video" if mode == "video" else "audio"
         folder = (folder or "").strip() or (VIDEO_FOLDER if mode == "video" else AUDIO_FOLDER)
         job = {
@@ -130,6 +132,7 @@ class JobManager:
             "mode": mode,
             "playlist": bool(playlist),
             "folder": "/" + folder.strip("/"),
+            "duplicates": duplicates if duplicates in DUPLICATE_POLICIES else "skip",
             "status": "queued",
             "progress": 0.0,
             "title": None,
@@ -280,13 +283,35 @@ class JobManager:
                 t["cover"], t["cover_source"] = thumb_cover, "miniature"
             auto_ok = t["confidence"] >= AUTO_CONFIDENCE
             self.library.record_unmapped(t.get("unmapped_genres") or [], t.get("artist"), t.get("genre_consensus") or [])
-            tagging.write_tags(path, t)
             folder, name = tagging.target_path(t, job["folder"], auto_ok)
+            policy = job.get("duplicates", "skip")
+            exists = policy != "keep" and self.pcloud.path_exists(f"{folder}/{name}")
+            if exists and policy == "skip":
+                uploaded.append({"name": name, "path": f"{folder}/{name}", "skipped": True, "title": t.get("title"),
+                                 "artist": t.get("artist"), "album": t.get("album"), "genre": t.get("genre"),
+                                 "track": t.get("track"), "duration": entry.get("duration"), "to_sort": False,
+                                 "confidence": round(t["confidence"], 2), "source": t.get("source")})
+                os.remove(path)
+                self._update(job_id, files=list(uploaded))
+                continue
+            self._update(job_id, message=f"{label}Recherche des paroles…")
+            found = lyrics.fetch(t.get("artist"), t.get("title"), t.get("album"), entry.get("duration"))
+            if found and found.get("text"):
+                t["lyrics"] = found["text"]
+            lyrics_state = (None if not found else "instrumental" if found["instrumental"]
+                            else "synchronisées" if found["synced"] else "texte")
+            tagging.write_tags(path, t)
             final = os.path.join(os.path.dirname(path), f"up-{i}", name)
             os.makedirs(os.path.dirname(final), exist_ok=True)
             os.replace(path, final)
             self._update(job_id, status="uploading", progress=0, message=f"{label}Envoi vers pCloud : {name}")
-            res = self.pcloud.upload(final, folder, on_progress=lambda p: self._update(job_id, progress=round(p, 1)))
+            res = self.pcloud.upload(final, folder, on_progress=lambda p: self._update(job_id, progress=round(p, 1)),
+                                     overwrite=bool(exists and policy == "replace"))
+            if exists:
+                res["replaced"] = True
+            res["lyrics"] = lyrics_state
+            if auto_ok and self.is_album(t):
+                self.ensure_folder_cover(folder, t.get("cover") if t.get("cover_source") != "miniature" else None)
             res.update(confidence=round(t["confidence"], 2), genre=t.get("genre"), to_sort=not auto_ok,
                        album=t.get("album"), cover=t.get("cover_source"),
                        title=t.get("title"), artist=t.get("artist"), albumartist=t.get("albumartist"),
@@ -296,7 +321,7 @@ class JobManager:
                        cover_key=self._save_job_cover(job_id, t.get("cover")),
                        thumb_key=self._save_job_cover(job_id, thumb_cover) if thumb_cover != t.get("cover") else None,
                        root=job["folder"],
-                       tags={k: v for k, v in t.items() if k not in ("cover",)})
+                       tags={k: v for k, v in t.items() if k not in ("cover", "lyrics")})
             reason = "à trier" if not auto_ok else ("genre manquant" if not t.get("genre") else None)
             if reason:
                 try:
@@ -311,6 +336,38 @@ class JobManager:
             self._save_jobs()
         return uploaded
 
+    def ensure_folder_cover(self, folder, cover, force_check=False):
+        """Put cover.jpg in an album folder if it has none (never in Singles / _A trier, never overwritten).
+        Returns the uploaded file's info, or None."""
+        if not FOLDER_COVER or not cover or not folder:
+            return None
+        last = folder.rstrip("/").rsplit("/", 1)[-1]
+        if last in (tagging.SINGLES_FOLDER, tagging.TO_SORT_FOLDER):
+            return None
+        if not hasattr(self, "_covered"):
+            self._covered = set()
+        if folder in self._covered and not force_check:
+            return None
+        self._covered.add(folder)
+        try:
+            if self.pcloud.path_exists(f"{folder}/cover.jpg"):
+                return None
+            work = tempfile.mkdtemp(prefix="cov-", dir=WORK_DIR)
+            try:
+                local = os.path.join(work, "cover.jpg")
+                with open(local, "wb") as fh:
+                    fh.write(cover)
+                return self.pcloud.upload(local, folder)
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+        except Exception as e:
+            sources.log.warning("cover.jpg %s: %s", folder, e)
+            return None
+
+    @staticmethod
+    def is_album(t):
+        return bool(t.get("album")) and t.get("release_type") != "Single"
+
     @staticmethod
     def _group_key(job_id, t):
         return f"{job_id}|{(t.get('albumartist') or '').lower()}|{(t.get('album') or '').lower()}"
@@ -320,6 +377,8 @@ class JobManager:
         """What the summary card shows: album-level tags and anything worth a second look."""
         if not files:
             return None
+        skipped_files = [f for f in files if f.get("skipped")]
+        all_files, files = files, [f for f in files if not f.get("skipped")] or files
         first = files[0]
         albums = {(f.get("albumartist"), f.get("album")) for f in files if f.get("album")}
         genres = sorted({f.get("genre") for f in files if f.get("genre")})
@@ -332,6 +391,9 @@ class JobManager:
             anomalies.append("pochette : miniature de la vidéo")
         elif not any(f.get("cover_key") for f in files):
             anomalies.append("sans pochette")
+        skipped = len(skipped_files)
+        if skipped:
+            anomalies.append(f"{skipped} déjà présent(s) dans pCloud, non téléchargé(s)")
         to_sort = sum(1 for f in files if f.get("to_sort"))
         if to_sort:
             anomalies.append(f"{to_sort} piste(s) dans « {tagging.TO_SORT_FOLDER} »")
@@ -343,17 +405,20 @@ class JobManager:
         expected = max((f.get("total_tracks") or 0 for f in files), default=0)
         if len(files) > 1 and expected and len(files) < expected:
             anomalies.append(f"{len(files)}/{expected} pistes")
+        if skipped and skipped == len(all_files):  # nothing new was downloaded: only say so
+            anomalies = [f"{skipped} déjà présent(s) dans pCloud, non téléchargé(s)"]
         return {
-            "kind": "album" if len(files) > 1 else "single",
+            "kind": "album" if len(all_files) > 1 else "single",
             "title": first.get("title"), "artist": first.get("artist"),
             "album": first.get("album"), "albumartist": first.get("albumartist") or first.get("artist"),
-            "year": first.get("year"), "genres": genres, "tracks": len(files),
+            "year": first.get("year"), "genres": genres, "tracks": len(all_files),
             "sources": sorted({f.get("source") for f in files if f.get("source")}),
             "confidence": min((f.get("confidence") or 0) for f in files),
             "cover_key": next((f.get("cover_key") for f in files if f.get("cover_key")), None),
             "folder": first.get("path", "").rsplit("/", 1)[0],
             "anomalies": anomalies,
             "in_review": sum(1 for f in files if f.get("review_id")),
+            "lyrics": sum(1 for f in files if f.get("lyrics") in ("synchronisées", "texte")),
         }
 
     def _run(self, job_id):
@@ -563,6 +628,8 @@ class JobManager:
             res = self.pcloud.upload(local, folder, overwrite=same_place)
             if not same_place:
                 self.pcloud.delete(item["fileid"])
+            if self.is_album(tags) and cover and cover_name != "miniature":
+                self.ensure_folder_cover(folder, cover, force_check=True)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
         if remember and tags.get("genre"):

@@ -55,6 +55,9 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 | `ACOUSTID_API_KEY` | Reconnaissance par empreinte audio (morceaux mal titrés) | — |
 | `DISCOGS_TOKEN` | Identification de secours et genres/styles Discogs | — |
 | `LASTFM_API_KEY` | Genres d'après les tags Last.fm | — |
+| `LYRICS` | Ajouter les paroles (LRCLIB) | `true` |
+| `MUSIC_FOLDER_COVER` | Déposer cover.jpg dans les dossiers d'album | `true` |
+| `DUPLICATES` | Morceau déjà présent (API sans choix) : `skip`, `replace` ou `keep` | `skip` |
 | `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | Vérifie le jeton Cloudflare Access (recommandé) | — |
 | `API_TOKEN` | Jeton alternatif (`Authorization: Bearer …`) | — |
 

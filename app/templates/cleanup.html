@@ -73,6 +73,7 @@ button:disabled{opacity:.55;cursor:default}
       <label class="check"><input type="checkbox" data-opt="tags" checked> Tags</label>
       <label class="check"><input type="checkbox" data-opt="genre" checked> Genre</label>
       <label class="check"><input type="checkbox" data-opt="rename" checked> Renommage et rangement</label>
+      <label class="check"><input type="checkbox" data-opt="lyrics" checked> Paroles</label>
     </div>
     <label class="check"><input type="checkbox" id="recheck"> Réanalyser aussi les fichiers déjà traités</label>
     <div class="row" style="margin-top:10px"><button id="start">Analyser</button><span class="m" id="startInfo"></span></div>
@@ -90,7 +91,7 @@ const STATUS = {listing: 'liste des fichiers', analyzing: 'analyse', ready: 'à 
                 undoing: 'annulation', undone: 'annulé', error: 'erreur'};
 const ITEM = {applied: ['corrigé', 'b-ok'], error: ['erreur', 'b-err'], skipped: ['non appliqué', ''], review: ['envoyé à « À valider »', 'b-warn']};
 const LABELS = {title: 'Titre', artist: 'Artiste', albumartist: "Artiste de l'album", album: 'Album', track: 'Piste', total_tracks: 'Nb pistes',
-                disc: 'Disque', total_discs: 'Nb disques', year: 'Année', label: 'Label', genre: 'Genre'};
+                disc: 'Disque', total_discs: 'Nb disques', year: 'Année', label: 'Label', genre: 'Genre', lyrics: 'Paroles'};
 let current = null, maxFiles = 100;
 
 async function api(path, body) {
@@ -151,13 +152,16 @@ function itemRow(run, it) {
     <div class="covs">${covers}</div>
     <div class="body">
       <div class="path">${esc(it.path)}</div>
-      ${it.new_path ? `<div class="newpath">→ ${esc(it.new_path)}</div>` : ''}
+      ${it.delete ? '<div class="conf">→ copie en double : mise à la corbeille pCloud</div>' : it.new_path ? `<div class="newpath">→ ${esc(it.new_path)}</div>` : ''}
       <div class="diff">${diffs}</div>
       <div class="m">${it.confidence != null ? `confiance ${Math.round(it.confidence * 100)} % · ${esc(it.source || '')}` : 'sans recherche en ligne'}
         ${st ? ` <span class="badge ${st[1]}">${st[0]}</span>` : ''}</div>
       ${it.conflict ? `<div class="conf">⚠ ${esc(it.conflict)}</div>` : ''}
       ${it.error ? `<div class="err">${esc(it.error)}</div>` : ''}
-      ${editable ? `<div class="row" style="margin-top:6px"><button class="ghost" data-review>Ajuster dans « À valider »</button></div>` : ''}
+      ${editable ? `<div class="row" style="margin-top:6px">
+        ${it.conflict && it.dup ? '<button class="ghost" data-dup="keep">Garder celle-ci (l’autre à la corbeille)</button>' : ''}
+        ${it.conflict && it.dup_existing ? '<button class="ghost" data-dup="trash">Mettre ce doublon à la corbeille</button>' : ''}
+        ${!it.delete ? '<button class="ghost" data-review>Ajuster dans « À valider »</button>' : ''}</div>` : ''}
     </div></div>`;
 }
 
@@ -199,8 +203,9 @@ async function loadDetail() {
   let html = `<h2>Résultat · ${esc(run.folder)}</h2><p class="m">${esc(run.message || '')}
     ${run.found ? ` · ${run.found} MP3 trouvés, ${run.skipped} déjà traités` + (run.clean != null ? `, ${run.clean} déjà propres` : '') : ''}</p>`;
   if (busy) html += `<div class="bar"><i style="width:${run.progress}%"></i></div>`;
-  if (run.status === 'ready' && run.items.length) {
-    const sel = run.items.filter(i => i.checked && i.status === 'pending').length;
+  if (run.status === 'ready' && (run.items.length || (run.folder_covers || []).length)) {
+    const sel = run.items.filter(i => i.checked && i.status === 'pending').length
+              + (run.folder_covers || []).filter(f => f.checked && f.status === 'pending').length;
     html += `<div class="toolbar"><button data-apply>Appliquer la sélection (<span data-count>${sel}</span>)</button>
       <button class="ghost" data-all>Tout cocher</button><button class="ghost" data-none>Tout décocher</button>
       <span class="m">Cochés d'office : changements sûrs (confiance élevée, sans conflit).</span></div>`;
@@ -208,18 +213,32 @@ async function loadDetail() {
   if (run.status === 'done' && run.journal && run.journal.length)
     html += `<div class="toolbar"><button class="ghost" data-undo>Annuler ce nettoyage (${run.journal.length} fichier(s))</button></div>`;
   if (!busy) html += `<div class="row" style="justify-content:flex-end"><button class="ghost" data-delete>Supprimer de l'historique</button></div>`;
-  html += renderGroups(run) || (busy ? '' : '<p class="empty">Aucune correction proposée.</p>');
+  const fcs = run.folder_covers || [];
+  if (fcs.length) {
+    const fcEditable = run.status === 'ready';
+    html += `<h2>cover.jpg à créer <span class="m">(dossiers d'album sans image ; jamais dans Singles ni _A trier)</span></h2>` + fcs.map(fc => `
+      <div class="card item" data-fc="${fc.n}">
+        ${fcEditable && fc.status === 'pending' ? `<input type="checkbox" data-fcpick ${fc.checked ? 'checked' : ''}>` : ''}
+        <div class="covs"><img src="api/cleanup/${run.id}/cover/${fc.idx}/${fc.kind}" alt=""></div>
+        <div class="body"><div class="path">${esc(fc.folder)}/cover.jpg</div>
+          ${ITEM[fc.status] ? `<span class="badge ${ITEM[fc.status][1]}">${ITEM[fc.status][0]}</span>` : ''}
+          ${fc.error ? `<div class="err">${esc(fc.error)}</div>` : ''}</div></div>`).join('');
+    if ((run.items || []).length) html += '<h2>Fichiers</h2>';
+  }
+  html += renderGroups(run) || (busy || fcs.length ? '' : '<p class="empty">Aucune correction proposée.</p>');
   const detail = $('#detail');
   const picks = {}; detail.querySelectorAll('[data-pick]').forEach(c => picks[c.closest('[data-idx]').dataset.idx] = c.checked);
+  const fpicks = {}; detail.querySelectorAll('[data-fcpick]').forEach(c => fpicks[c.closest('[data-fc]').dataset.fc] = c.checked);
   detail.innerHTML = html;
-  detail.querySelectorAll('[data-pick]').forEach(c => { const k = c.closest('[data-idx]').dataset.idx; if (k in picks) c.checked = picks[k]; });
+  detail.querySelectorAll('[data-pick]').forEach(c => { const k = c.closest('[data-idx]').dataset.idx; if (k in picks && !c.closest('.item').textContent.includes('corbeille pCloud')) c.checked = picks[k]; });
+  detail.querySelectorAll('[data-fcpick]').forEach(c => { const k = c.closest('[data-fc]').dataset.fc; if (k in fpicks) c.checked = fpicks[k]; });
   updateCount();
   return busy;
 }
-function updateCount() { const n = document.querySelectorAll('[data-pick]:checked').length; const el = $('[data-count]'); if (el) el.textContent = n; }
+function updateCount() { const n = document.querySelectorAll('[data-pick]:checked, [data-fcpick]:checked').length; const el = $('[data-count]'); if (el) el.textContent = n; }
 
 $('#detail').addEventListener('change', async e => {
-  if (e.target.matches('[data-pick]')) updateCount();
+  if (e.target.matches('[data-pick]') || e.target.matches('[data-fcpick]')) updateCount();
   if (e.target.matches('[data-gpick]')) {
     e.target.closest('.group').querySelectorAll('[data-pick]').forEach(c => c.checked = e.target.checked); updateCount();
   }
@@ -240,18 +259,25 @@ $('#detail').addEventListener('change', async e => {
 });
 $('#detail').addEventListener('click', async e => {
   const t = e.target;
-  if (t.matches('[data-all]') || t.matches('[data-none]')) { document.querySelectorAll('[data-pick]').forEach(c => c.checked = t.matches('[data-all]')); updateCount(); }
+  if (t.matches('[data-all]') || t.matches('[data-none]')) { document.querySelectorAll('[data-pick], [data-fcpick]').forEach(c => c.checked = t.matches('[data-all]')); updateCount(); }
   if (t.matches('[data-apply]')) {
     const selected = [...document.querySelectorAll('[data-pick]:checked')].map(c => +c.closest('[data-idx]').dataset.idx);
-    if (!selected.length) return alert('Aucun fichier coché.');
-    if (!confirm(`Appliquer les corrections à ${selected.length} fichier(s) ? Les fichiers non cochés ne seront plus proposés au prochain nettoyage (sauf avec « Réanalyser »).`)) return;
-    try { await api(`api/cleanup/${current}/apply`, {selected}); poll(); } catch (x) { alert(x.message); }
+    const covers = [...document.querySelectorAll('[data-fcpick]:checked')].map(c => +c.closest('[data-fc]').dataset.fc);
+    if (!selected.length && !covers.length) return alert('Rien de coché.');
+    const trash = document.querySelectorAll('[data-pick]:checked').length && [...document.querySelectorAll('.item')].filter(i => i.querySelector('[data-pick]:checked') && i.textContent.includes('corbeille pCloud')).length;
+    if (!confirm(`Appliquer : ${selected.length} fichier(s)${covers.length ? `, ${covers.length} cover.jpg` : ''}${trash ? `, dont ${trash} doublon(s) mis à la corbeille` : ''} ?\nLes fichiers non cochés ne seront plus proposés au prochain nettoyage (sauf avec « Réanalyser »).`)) return;
+    try { await api(`api/cleanup/${current}/apply`, {selected, covers}); poll(); } catch (x) { alert(x.message); }
   }
   if (t.matches('[data-undo]') && confirm('Annuler toutes les corrections de ce nettoyage ?')) {
     try { await api(`api/cleanup/${current}/undo`, {}); poll(); } catch (x) { alert(x.message); }
   }
   if (t.matches('[data-delete]') && confirm('Supprimer ce nettoyage de l’historique ? Il ne pourra plus être annulé.')) {
     try { await api(`api/cleanup/${current}/delete`, {}); current = null; await loadRuns(); loadDetail(); } catch (x) { alert(x.message); }
+  }
+  if (t.dataset.dup) {
+    try { await api(`api/cleanup/${current}/duplicate`, {idx: +t.closest('[data-idx]').dataset.idx, action: t.dataset.dup}); loadDetail(); }
+    catch (x) { alert(x.message); }
+    return;
   }
   if (t.matches('[data-greview]')) {
     const idxs = t.closest('.group').dataset.idxs.split(',').filter(Boolean).map(Number);

@@ -16,6 +16,7 @@ h1{font-size:22px;margin:0 0 4px}
 .sub{color:var(--muted);margin:0 0 20px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
 label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+select#dups{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit}
 input[type=url],input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;font:inherit}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
@@ -85,6 +86,12 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
       </div>
       <label class="check"><input type="checkbox" name="playlist" id="playlist" autocomplete="off"> Playlist entière</label>
     </div>
+    <label for="dups">Si le morceau existe déjà dans pCloud</label>
+    <select id="dups" name="duplicates" autocomplete="off">
+      <option value="skip">Ne pas le télécharger</option>
+      <option value="replace">Le remplacer</option>
+      <option value="keep">Garder les deux</option>
+    </select>
     <label for="folder">Dossier pCloud</label>
     <input id="folder" name="folder" type="text" value="{{ audio_folder }}" autocomplete="off">
     <div class="row" style="margin-top:14px"><button id="go" type="submit">Télécharger</button></div>
@@ -125,12 +132,15 @@ function initForm() {
   setMode(qs.get('mode') || store.get('mode') || 'audio');
 }
 window.addEventListener('pageshow', initForm);
+const dups = $('#dups');
+dups.addEventListener('change', () => store.set('dups', dups.value));
+window.addEventListener('pageshow', () => { dups.value = store.get('dups') || 'skip'; });
 
 $('#f').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = $('#go'); btn.disabled = true;
   const body = {url: $('#url').value.trim(), mode: document.querySelector('input[name=mode]:checked').value,
-                playlist: $('#playlist').checked, folder: folder.value};
+                playlist: $('#playlist').checked, folder: folder.value, duplicates: $('#dups').value};
   try {
     const r = await fetch('api/download', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     const j = await r.json();
@@ -162,7 +172,7 @@ function summaryCard(j) {
   const genre = s.genres.length ? `Genre : <b>${esc(s.genres.join(', '))}</b>` : '<span class="warnc">⚠ aucun genre</span>';
   const anomalies = s.anomalies.filter(a => a !== 'aucun genre').map(a => `<span class="anom">⚠ ${esc(a)}</span>`).join(' ');
   const tracks = j.files.map(f => `<li>${f.track ? String(f.track).padStart(2, '0') + ' - ' : ''}${esc(f.title || f.name)}
-      <span class="dim">${fmtDur(f.duration)}${f.genre ? ' · ' + esc(f.genre) : ''}</span>${f.to_sort ? '<span class="badge sort">à trier</span>' : ''}${f.review_id ? '<span class="badge">à valider</span>' : ''}</li>`).join('');
+      <span class="dim">${fmtDur(f.duration)}${f.genre ? ' · ' + esc(f.genre) : ''}${f.lyrics === 'synchronisées' || f.lyrics === 'texte' ? ' · ♪ paroles' : ''}</span>${f.skipped ? '<span class="badge">déjà présent</span>' : ''}${f.replaced ? '<span class="badge">remplacé</span>' : ''}${f.to_sort ? '<span class="badge sort">à trier</span>' : ''}${f.review_id ? '<span class="badge">à valider</span>' : ''}</li>`).join('');
   return `<div class="job done sum" data-job="${j.id}">
     <div class="sumrow">${cover}<div class="info">${head}
       <div class="m">${genre} · ${esc(s.sources.join(' + ') || '?')} · confiance ${Math.round(s.confidence * 100)} %</div>

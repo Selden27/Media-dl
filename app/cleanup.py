@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mutagen.id3 import ID3
 
-from . import musicmeta, sources, tagging
+from . import lyrics, musicmeta, sources, tagging
 
 DATA_DIR = os.getenv("CLEANUP_DIR", "/data/cleanup")
 MAX_FILES = int(os.getenv("CLEANUP_MAX_FILES", "100"))
@@ -29,7 +29,7 @@ ID_FIELDS = ("release_id", "release_group_id", "recording_id", "artist_id", "alb
              "release_type", "discogs_release_id", "isrc", "date", "original_date", "compilation")
 LABELS = {"title": "Titre", "artist": "Artiste", "albumartist": "Artiste de l'album", "album": "Album",
           "track": "Piste", "total_tracks": "Nb pistes", "disc": "Disque", "total_discs": "Nb disques",
-          "year": "Année", "label": "Label", "genre": "Genre"}
+          "year": "Année", "label": "Label", "genre": "Genre", "lyrics": "Paroles"}
 BUSY = ("listing", "analyzing", "applying", "undoing")
 
 
@@ -43,6 +43,24 @@ def _name_hints(name):
     if len(parts) >= 2:
         return track, parts[0], " - ".join(parts[1:])
     return track, None, parts[0] if parts else base
+
+
+def _duration(head, filesize):
+    """Length of an MP3 from its first bytes: exact for VBR files (Xing/VBRI header), from the
+    file size and bitrate otherwise. None when it cannot be told."""
+    try:
+        from mutagen.mp3 import BitrateMode, MPEGInfo
+        info = MPEGInfo(io.BytesIO(head))
+        if info.bitrate_mode in (BitrateMode.VBR, BitrateMode.ABR) and info.length:
+            return round(info.length, 1)
+        if info.bitrate and filesize:
+            id3_size = 0
+            if head[:3] == b"ID3":
+                id3_size = 10 + ((head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9])
+            return round((filesize - id3_size) * 8 / info.bitrate, 1)
+    except Exception:
+        pass
+    return None
 
 
 def _cover_info(data):
@@ -130,7 +148,7 @@ class Cleanup:
     def start(self, folder, root, options, recheck=False):
         if self.busy():
             raise RuntimeError("Un nettoyage est déjà en cours.")
-        if not any(options.get(k) for k in ("tags", "genre", "covers", "rename")):
+        if not any(options.get(k) for k in ("tags", "genre", "covers", "rename", "lyrics")):
             raise RuntimeError("Choisis au moins une correction.")
         run = {"id": uuid.uuid4().hex[:10], "created": time.time(), "folder": "/" + folder.strip("/"),
                "root": "/" + (root or folder).strip("/"), "options": options, "recheck": bool(recheck),
@@ -174,8 +192,11 @@ class Cleanup:
             for i, f in enumerate(pending):
                 self._update(run_id, status="analyzing", progress=round(i / len(pending) * 40),
                              message=f"Lecture des tags ({i + 1}/{len(pending)}) : {f['name']}")
+                duration = None
                 try:
-                    id3 = ID3(fileobj=io.BytesIO(self.m.pcloud.read_head(f["fileid"])))
+                    head = self.m.pcloud.read_head(f["fileid"])
+                    duration = _duration(head, f.get("size"))
+                    id3 = ID3(fileobj=io.BytesIO(head))
                     cur = tagging.read_tags(id3)
                 except Exception:
                     cur = {k: None for k in FIELDS + ID_FIELDS + ("genre", "url", "cover")}
@@ -184,7 +205,7 @@ class Cleanup:
                     self._save_cover(run_id, i, "cur", cover)
                     self._save_cover(run_id, i, "old", musicmeta._to_jpeg(cover) if len(cover) > 200_000 else cover)
                 track, n_artist, n_title = _name_hints(f["name"])
-                items.append({"idx": i, "fileid": f["fileid"], "path": f["path"], "name": f["name"],
+                items.append({"idx": i, "fileid": f["fileid"], "path": f["path"], "name": f["name"], "duration": duration,
                               "modified": f["modified"], "current": cur, "cover_info": _cover_info(cover),
                               "name_hints": {"track": track, "artist": n_artist, "title": n_title}})
 
@@ -199,6 +220,7 @@ class Cleanup:
                                                          or not (c.get("release_id") or c.get("discogs_release_id"))),
                     "genre": bool(opts.get("genre")) and (not c.get("genre") or lib._find(c["genre"]) != c["genre"]),
                     "covers": bool(opts.get("covers")) and (not ci["present"] or not ci.get("square") or ci.get("small")),
+                    "lyrics": bool(opts.get("lyrics")) and not c.get("has_lyrics"),
                 }
 
             groups = {}
@@ -215,7 +237,7 @@ class Cleanup:
                                  message=f"Identification ({done}/{len(items)}) : {it['name']}")
                     need = needs(it)
                     it["needs"] = need
-                    if not any(need.values()):
+                    if not (need["tags"] or need["genre"] or need["covers"]):
                         it["ident"] = None
                         continue
                     c, nh = it["current"], it["name_hints"]
@@ -238,7 +260,7 @@ class Cleanup:
                     if not t:
                         info = {"title": title, "track": title if (c.get("artist") or nh["artist"]) else None,
                                 "artist": c.get("artist") or nh["artist"], "album": c.get("album"),
-                                "duration": None, "webpage_url": c.get("url"), "genre": c.get("genre")}
+                                "duration": it.get("duration"), "webpage_url": c.get("url"), "genre": c.get("genre")}
                         try:
                             t = musicmeta.identify(info, lib, path=None, auto_confidence=auto)
                         except Exception as e:
@@ -268,20 +290,46 @@ class Cleanup:
             for it in items:
                 if it.get("new_path") and it["new_path"] != it["path"]:
                     targets.setdefault(it["new_path"].lower(), []).append(it)
-            for path, its in targets.items():
+            by_path = {it["path"].lower(): it for it in items}
+            for n, (path, its) in enumerate(targets.items()):
                 if len(its) > 1:
                     for it in its:
                         others = ", ".join(o["path"] for o in its if o is not it)
-                        it.update(conflict=f"doublon probable : même destination que {others}", checked=False)
+                        it.update(conflict=f"doublon probable : même destination que {others}", checked=False,
+                                  dup=f"d{n}")
+                elif path in by_path:
+                    its[0].update(conflict=f"doublon probable : une copie est déjà en place ({by_path[path]['path']})",
+                                  checked=False, dup_existing=True)
                 elif self.m.pcloud.path_exists(its[0]["new_path"]):
                     its[0].update(conflict="un fichier existe déjà à cet endroit", checked=False)
+            # 5. cover.jpg for album folders that have none (never Singles / _A trier)
+            folder_covers = []
+            if opts.get("covers"):
+                seen = set()
+                for it in items:
+                    f = it.get("final") or it["current"]
+                    if not f.get("album") or f.get("release_type") == "Single" or it.get("conflict"):
+                        continue
+                    folder = (it.get("new_path") or it["path"]).rsplit("/", 1)[0]
+                    if folder.rsplit("/", 1)[-1] in (tagging.SINGLES_FOLDER, tagging.TO_SORT_FOLDER) or folder in seen:
+                        continue
+                    ci = it["cover_info"]
+                    kind = "new" if it.get("cover_change") else ("cur" if ci.get("present") and ci.get("square") else None)
+                    if not kind:
+                        continue
+                    seen.add(folder)
+                    if not self.m.pcloud.path_exists(f"{folder}/cover.jpg"):
+                        folder_covers.append({"n": len(folder_covers), "folder": folder, "idx": it["idx"], "kind": kind,
+                                              "checked": True, "status": "pending"})
             clean = [it for it in items if not it["has_changes"]]
             with self.lock:
                 for it in clean:
                     self.state[str(it["fileid"])] = it["modified"]
+                msg = f"{len(items) - len(clean)} fichier(s) à corriger, {len(clean)} déjà propre(s)."
+                if folder_covers:
+                    msg += f" {len(folder_covers)} cover.jpg à créer."
                 self.runs[run_id].update(items=[it for it in items if it["has_changes"]], clean=len(clean),
-                                         status="ready", progress=100,
-                                         message=f"{len(items) - len(clean)} fichier(s) à corriger, {len(clean)} déjà propre(s).")
+                                         folder_covers=folder_covers, status="ready", progress=100, message=msg)
             self._save()
         except Exception as e:
             sources.log.warning("cleanup: %s", e)
@@ -345,6 +393,12 @@ class Cleanup:
             if new:
                 cover_change = self._save_cover(run_id, it["idx"], "new", new)
 
+        if need.get("lyrics"):
+            found = lyrics.fetch(final.get("artist"), final.get("title"), final.get("album"), it.get("duration"))
+            if found and found.get("text"):
+                it["lyrics"] = found["text"]
+                changes["lyrics"] = [None, "synchronisées" if found["synced"] else "texte"]
+
         new_path = None
         if opts.get("rename") and (final.get("artist") or final.get("albumartist")) and final.get("title"):
             folder, name = tagging.target_path(final, run["root"], True)
@@ -361,15 +415,15 @@ class Cleanup:
                   checked=has_changes and (not from_ident or (conf or 0) >= auto))
 
     # -------------------------------------------------------------- apply
-    def apply(self, run_id, selected):
+    def apply(self, run_id, selected, covers=()):
         run = self.get(run_id)
         if not run or run["status"] != "ready":
             raise RuntimeError("Ce nettoyage n'est pas prêt à être appliqué.")
         self._update(run_id, status="applying", message="Application…", progress=0)
         self._save()
-        self.pool.submit(self._apply, run_id, {int(i) for i in selected})
+        self.pool.submit(self._apply, run_id, {int(i) for i in selected}, {int(c) for c in covers})
 
-    def _apply(self, run_id, selected):
+    def _apply(self, run_id, selected, covers=frozenset()):
         run = self.get(run_id)
         items = run["items"]
         todo = [it for it in items if it["idx"] in selected and it["status"] == "pending"]
@@ -379,7 +433,7 @@ class Cleanup:
                          message=f"Application ({k}/{len(todo)}) : {it['name']}")
             try:
                 entry = self._apply_item(run_id, run, it)
-                it.update(status="applied", result_path=entry["new_path"])
+                it.update(status="applied", result_path=None if entry["mode"] == "delete" else entry["new_path"])
                 with self.lock:
                     self.runs[run_id]["journal"].append(entry)
                     self.state[str(entry["new_fileid"])] = "*"
@@ -390,7 +444,24 @@ class Cleanup:
             with self.lock:
                 self.runs[run_id]["items"] = items
             self._save()
+        fcs = run.get("folder_covers") or []
+        for fc in fcs:
+            if fc["n"] not in covers or fc["status"] != "pending":
+                fc["status"] = "skipped" if fc["status"] == "pending" else fc["status"]
+                continue
+            try:
+                res = self.m.ensure_folder_cover(fc["folder"], self.cover(run_id, fc["idx"], fc["kind"]), force_check=True)
+                fc["status"] = "applied" if res else "skipped"
+                if res:
+                    with self.lock:
+                        self.runs[run_id]["journal"].append({"mode": "folder_cover", "idx": fc["idx"], "new_fileid": res.get("fileid"),
+                                                             "old_path": res["path"], "new_path": res["path"]})
+                    n_ok += 1
+            except Exception as e:
+                fc.update(status="error", error=str(e)[:200])
+                n_err += 1
         with self.lock:
+            self.runs[run_id]["folder_covers"] = fcs
             for it in items:  # left unticked: don't propose them again next time
                 if it["status"] == "pending":
                     it["status"] = "skipped"
@@ -406,6 +477,10 @@ class Cleanup:
         folder, _, name = new_path.rpartition("/")
         rewrite = bool(it["changes"] or it["cover_change"] or it["ids_changed"])
         entry = {"idx": it["idx"], "old_path": old_path, "old_fileid": it["fileid"], "new_path": new_path}
+        if it.get("delete"):
+            pc.delete(it["fileid"])  # goes to the pCloud trash
+            entry.update(mode="delete", new_fileid=it["fileid"], new_path=old_path)
+            return entry
         if not rewrite:
             res = pc.move(it["fileid"], folder, name)
             entry.update(mode="move", new_fileid=res.get("fileid") or it["fileid"], new_path=res["path"])
@@ -421,7 +496,7 @@ class Cleanup:
             old_cover = old.pop("cover", None)
             self._save_cover(run_id, it["idx"], "orig", old_cover)
             cover = self.cover(run_id, it["idx"], "new") if it["cover_change"] else old_cover
-            tagging.write_tags(local, dict(it["final"], cover=cover))
+            tagging.write_tags(local, dict(it["final"], cover=cover, lyrics=it.get("lyrics")))
             same = new_path == old_path
             res = pc.upload(local, folder, overwrite=same)
             if not same:
@@ -429,7 +504,7 @@ class Cleanup:
         finally:
             shutil.rmtree(work, ignore_errors=True)
         entry.update(mode="rewrite", new_fileid=res.get("fileid"), new_path=res["path"], old_tags=old,
-                     had_cover=bool(old_cover))
+                     had_cover=bool(old_cover), added_lyrics=bool(it.get("lyrics") and not old.get("has_lyrics")))
         return entry
 
     # --------------------------------------------------------------- undo
@@ -450,6 +525,10 @@ class Cleanup:
             try:
                 if e["mode"] == "move":
                     pc.move(e["new_fileid"], folder, name)
+                elif e["mode"] == "delete":
+                    pc.restore(e["new_fileid"])
+                elif e["mode"] == "folder_cover":
+                    pc.delete(e["new_fileid"])
                 else:
                     work = tempfile.mkdtemp(prefix=f"un-{run_id}-", dir=os.getenv("WORK_DIR", tempfile.gettempdir()))
                     try:
@@ -457,6 +536,10 @@ class Cleanup:
                         pc.download(e["new_fileid"], local)
                         old_cover = self.cover(run_id, e["idx"], "orig") if e.get("had_cover") else None
                         tagging.write_tags(local, dict(e.get("old_tags") or {}, cover=old_cover))
+                        if e.get("added_lyrics"):
+                            id3 = ID3(local)
+                            id3.delall("USLT")
+                            id3.save(local, v2_version=3)
                         same = e["old_path"] == e["new_path"]
                         pc.upload(local, folder, overwrite=same)
                         if not same:
@@ -492,6 +575,30 @@ class Cleanup:
                     it["checked"] = not it.get("conflict")
         self._save()
         return genre
+
+    def duplicate(self, run_id, idx, action):
+        """keep: keep this copy and send the other(s) of its group to the pCloud trash.
+        trash: send this copy to the trash (another copy is already in place)."""
+        idx = int(idx)
+        with self.lock:
+            run = self.runs.get(run_id)
+            if not run or run["status"] != "ready":
+                raise RuntimeError("Ce nettoyage n'est plus modifiable.")
+            it = next((i for i in run["items"] if i["idx"] == idx), None)
+            if not it or it["status"] != "pending":
+                raise RuntimeError("Fichier introuvable.")
+            if action == "trash":
+                it.update(delete=True, checked=True, conflict=None)
+            elif action == "keep" and it.get("dup"):
+                for other in run["items"]:
+                    if other.get("dup") == it["dup"] and other["status"] == "pending":
+                        if other is it:
+                            other.update(delete=False, checked=True, conflict=None)
+                        else:
+                            other.update(delete=True, checked=True, conflict=None)
+            else:
+                raise RuntimeError("Action impossible.")
+        self._save()
 
     def send_many_to_review(self, run_id, idxs):
         return [self.send_to_review(run_id, i) for i in idxs]

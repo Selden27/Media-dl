@@ -226,7 +226,7 @@ class PCloud:
         if len(head) < 10 or head[:3] != b"ID3":
             return head
         size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9]  # syncsafe integer
-        total = min(size + 20, max_bytes)
+        total = min(size + 20 + 16384, max_bytes)  # + the first audio frames: bitrate / exact length (Xing)
         return requests.get(url, headers={"Range": f"bytes=0-{total - 1}"}, timeout=60).content
 
     def move(self, fileid, folder_path, name):
@@ -235,6 +235,10 @@ class PCloud:
         data = self.call("renamefile", fileid=fileid, tofolderid=folder_id, toname=name)
         meta = data["metadata"]
         return {"name": meta["name"], "path": f"{folder_path.rstrip('/')}/{meta['name']}", "fileid": meta.get("fileid")}
+
+    def restore(self, fileid):
+        """Bring a deleted file back from the pCloud trash."""
+        return self.call("trash_restore", fileid=fileid)
 
     def path_exists(self, path):
         try:

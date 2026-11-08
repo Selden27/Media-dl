@@ -3,7 +3,7 @@ import os
 import re
 
 from mutagen.id3 import (APIC, COMM, ID3, TALB, TCMP, TCON, TDOR, TDRC, TIT2, TPE1, TPE2, TPOS, TPUB, TRCK,
-                         TSRC, TXXX, UFID, WOAS, ID3NoHeaderError)
+                         TSRC, TXXX, UFID, USLT, WOAS, ID3NoHeaderError)
 
 PATH_TEMPLATE = os.getenv("MUSIC_PATH_TEMPLATE", "%albumartist%/%album%/$num(%track%,2) - %title%")
 SINGLES_FOLDER = os.getenv("MUSIC_SINGLES_FOLDER", "Singles")
@@ -69,6 +69,8 @@ def write_tags(path, t):
         id3.add(COMM(encoding=3, lang="fra", desc="", text=f"Source : {t['url']}"))
     if t.get("cover"):
         id3.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=t["cover"]))
+    if t.get("lyrics") and not id3.getall("USLT"):  # never replace lyrics already in the file
+        id3.add(USLT(encoding=3, lang="und", desc="", text=t["lyrics"]))
     id3.save(path, v2_version=3)
 
 
@@ -102,6 +104,7 @@ def read_tags(id3):
     pics = id3.getall("APIC")
     pic = next((p for p in pics if p.type == 3), pics[0] if pics else None)
     t["cover"] = pic.data if pic is not None else None
+    t["has_lyrics"] = bool(id3.getall("USLT"))
     return t
 
 

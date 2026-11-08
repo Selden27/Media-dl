@@ -61,5 +61,14 @@ Fichiers : `app/data/genres.txt` (liste) et `app/data/genre_map.txt` (correspond
 - Journal des modifications + « Annuler ce nettoyage » ; cas douteux signalés, jamais écrasés.
 - 100 morceaux max par passage ; les fichiers déjà propres sont sautés au passage suivant.
 
-### Étape 5 : options
-- Paroles (LRCLIB), ReplayGain, gestion des doublons (sauter / remplacer / renommer), `cover.jpg` par dossier d'album (à tester avec Evermusic).
+### Étape 5 : options ✅ (livrée)
+Choix guidés par ce que lit Evermusic Pro (documentation everappz.com) :
+- **Paroles** (LRCLIB) intégrées dans le tag paroles (USLT), synchronisées (LRC) quand elles existent : Evermusic
+  les fait défiler et les affiche dans son widget. Jamais d'écrasement de paroles existantes. Case « Paroles » au nettoyage.
+- **cover.jpg** dans chaque dossier d'album (jamais dans Singles ni _A trier, jamais écrasé), au téléchargement,
+  à la validation et proposé au nettoyage.
+- **Doublons** : au téléchargement, « ne pas le télécharger / le remplacer / garder les deux » ; au nettoyage,
+  « Garder celle-ci » ou « Mettre ce doublon à la corbeille » (corbeille pCloud, annulable).
+- **ReplayGain abandonné** : Evermusic normalise le volume lui-même en direct (EBU R128), sans tags.
+- Nettoyage : la durée est lue au début du fichier (exacte pour les MP3 VBR) ; sans durée ni album, jamais de
+  rangement automatique.

@@ -184,15 +184,24 @@ def search_recording(h):
         else:
             d = 0.5
         conf = 0.38 * t + 0.32 * a + 0.18 * d + 0.12 * (rec.get("score", 0) / 100)
+        if d == 0.5 and not h["album"]:
+            conf = min(conf, 0.84)  # no duration, no album: many recordings fit, never file automatically
         # A live / remix / edit version the source title does not mention is probably not the one.
         for word in VERSION_WORDS:
             if re.search(rf"\b{word}\b", rec.get("title") or "", re.I) and not re.search(rf"\b{word}\b", h["raw_title"], re.I):
                 conf -= 0.12
         releases = sorted(rec.get("releases") or [], key=_release_rank, reverse=True)
-        if h["album"]:  # the site named the album: prefer that release
-            releases.sort(key=lambda r: _sim(h["album"], r.get("title")) > 0.8, reverse=True)
-        out.append((round(conf, 3), rec, releases[0] if releases else None))
-    out.sort(key=lambda x: x[0], reverse=True)
+        if h["album"]:  # the album is known (site, or the file's own tags): prefer recordings released on it
+            on_album = [r for r in releases if _sim(h["album"], r.get("title")) > 0.8]
+            if on_album:
+                releases = on_album + [r for r in releases if r not in on_album]
+                conf += 0.06
+            else:
+                conf -= 0.1
+        best = releases[0] if releases else None
+        out.append((round(min(conf, 1.0), 3), rec, best))
+    # Ties (same title/artist, no duration): a recording on an official album beats a bootleg or live one.
+    out.sort(key=lambda x: (x[0], _release_rank(x[2]) if x[2] else (False, -9, -9999)), reverse=True)
     return out
 
 

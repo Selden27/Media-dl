@@ -127,7 +127,8 @@ def download():
         app.logger.warning("download refused: no valid URL (fields received: %s)", sorted(data))
         return jsonify(error="Lien invalide"), 400
     playlist = str(data.get("playlist", "")).lower() in ("1", "true", "on", "yes")
-    job = manager.submit(url, mode=_mode_from(data), playlist=playlist, folder=data.get("folder"))
+    job = manager.submit(url, mode=_mode_from(data), playlist=playlist, folder=data.get("folder"),
+                         duplicates=str(data.get("duplicates") or os.getenv("DUPLICATES", "skip")).lower())
     app.logger.info("download queued via %s: job %s (%s)", request.path, job["id"], job["mode"])
     return jsonify(job), 202
 
@@ -340,7 +341,7 @@ def cleanup_start():
     d = request.get_json(silent=True) or {}
     try:
         run = manager.cleanup.start(d.get("folder") or AUDIO_FOLDER, d.get("root") or AUDIO_FOLDER,
-                                    {k: bool((d.get("options") or {}).get(k)) for k in ("tags", "genre", "covers", "rename")},
+                                    {k: bool((d.get("options") or {}).get(k)) for k in ("tags", "genre", "covers", "rename", "lyrics")},
                                     bool(d.get("recheck")))
     except Exception as e:
         return jsonify(error=str(e)), 400
@@ -376,7 +377,8 @@ def _cleanup_action(fn, *args):
 
 @app.post("/api/cleanup/<run_id>/apply")
 def cleanup_apply(run_id):
-    return _cleanup_action(manager.cleanup.apply, run_id, (request.get_json(silent=True) or {}).get("selected") or [])
+    d = request.get_json(silent=True) or {}
+    return _cleanup_action(manager.cleanup.apply, run_id, d.get("selected") or [], d.get("covers") or [])
 
 
 @app.post("/api/cleanup/<run_id>/undo")
@@ -398,6 +400,12 @@ def cleanup_genre(run_id):
 @app.post("/api/cleanup/<run_id>/review-many")
 def cleanup_review_many(run_id):
     return _cleanup_action(manager.cleanup.send_many_to_review, run_id, (request.get_json(silent=True) or {}).get("idxs") or [])
+
+
+@app.post("/api/cleanup/<run_id>/duplicate")
+def cleanup_duplicate(run_id):
+    d = request.get_json(silent=True) or {}
+    return _cleanup_action(manager.cleanup.duplicate, run_id, d.get("idx"), d.get("action"))
 
 
 @app.post("/api/cleanup/<run_id>/delete")
