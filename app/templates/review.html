@@ -179,7 +179,9 @@ function groupHeader(key, items) {
       <div class="m">${esc(t.albumartist || t.artist || '')} · ${items.length} pistes à valider</div></div></div>
     <div class="grid">${GROUP_FIELDS.map(([k, l]) => `<div><label>${l} (toutes les pistes)</label><input data-g="${k}" value="${esc(t[k] ?? '')}"></div>`).join('')}
       <div><label>Genre (toutes les pistes)</label><select data-g="genre">${genreOptions(items.every(i => i.tags.genre === t.genre) ? t.genre : '')}</select></div></div>
-    <div class="row"><button data-validate-group>Valider tout l'album</button><span class="m" data-gstatus></span></div>
+    <div class="row"><button data-validate-group>Valider tout l'album</button>
+      <button class="ghost" data-dismiss-group title="Les fichiers restent où ils sont">Retirer l'album de la liste</button>
+      <span class="m" data-gstatus></span></div>
   </div>`;
 }
 
@@ -247,6 +249,14 @@ document.addEventListener('click', async e => {
       if (ownCard) schedulePreview(ownCard);
       const box = $('#suggestions'); if (box.querySelectorAll('.sugg').length === 0) box.innerHTML = '';
     } catch (x) { alert(x.message); }
+    return;
+  }
+  if (e.target.matches('[data-dismiss-group]')) {
+    const group = e.target.closest('.group');
+    const ids = [...group.querySelectorAll('.card[data-id]')].map(c => c.dataset.id);
+    if (!confirm(`Retirer les ${ids.length} pistes de cet album de la liste ? Les fichiers restent où ils sont dans pCloud.`)) return;
+    try { await api('api/review/dismiss', {ids}); group.remove(); } catch (x) { alert(x.message); }
+    if (!document.querySelector('.card[data-id]')) $('#items').innerHTML = '<p class="empty">Rien à valider pour l’instant. 🎉</p>';
     return;
   }
   if (e.target.matches('[data-validate-group]')) {

@@ -241,8 +241,15 @@ def review_validate(item_id):
 
 @app.post("/api/review/<item_id>/dismiss")
 def review_dismiss(item_id):
-    manager.review.remove(item_id)
+    manager.review_dismiss([item_id])
     return jsonify(ok=True)
+
+
+@app.post("/api/review/dismiss")
+def review_dismiss_many():
+    ids = (request.get_json(silent=True) or {}).get("ids") or []
+    manager.review_dismiss([str(i) for i in ids])
+    return jsonify(ok=True, removed=len(ids))
 
 
 # ------------------------------------------------------------- genre suggestions

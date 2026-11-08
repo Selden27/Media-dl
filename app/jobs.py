@@ -443,6 +443,21 @@ class JobManager:
         self._save_jobs()
         return created
 
+    def review_dismiss(self, item_ids):
+        """Remove items from the validation list (files stay where they are) and unlink their download."""
+        for item_id in item_ids:
+            item = self.review.get(item_id)
+            if not item:
+                continue
+            self.review.remove(item_id)
+            job_id, idx = item.get("job_id"), item.get("file_index")
+            with self.lock:
+                job = self.jobs.get(job_id) if job_id else None
+                if job and idx is not None and idx < len(job["files"]):
+                    job["files"][idx]["review_id"] = None
+                    job["summary"] = self.summarize(job["files"])
+        self._save_jobs()
+
     def _job_file_validated(self, item, res, tags, cover=None, cover_source=None):
         """Keep the download history in step after a validation."""
         job_id, idx = item.get("job_id"), item.get("file_index")
