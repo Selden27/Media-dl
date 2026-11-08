@@ -46,6 +46,12 @@ button:disabled{opacity:.55;cursor:default}
 .d s{color:var(--muted)}
 .conf{color:var(--err);font-size:13px}
 .empty{color:var(--muted)}
+.group{border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:16px;background:rgba(127,127,127,.04)}
+.group .card{margin-bottom:8px}
+.ghead{display:flex;gap:10px;align-items:flex-start;padding:4px 4px 12px}
+.ghead>input{margin-top:6px;width:18px;height:18px;flex:none}
+.ghead img,.ghead .nocov{width:64px;height:64px;border-radius:8px;object-fit:cover;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);flex:none}
+.ghead select{padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:inherit;font:inherit;max-width:100%}
 .err{color:var(--err);font-size:13px}
 </style>
 </head>
@@ -155,6 +161,36 @@ function itemRow(run, it) {
     </div></div>`;
 }
 
+let genres = [];
+fetch('api/genres').then(r => r.json()).then(d => genres = d.genres).catch(() => {});
+const genreOptions = sel => '<option value="">— genre de l’album —</option>' + genres.map(g => `<option ${g === sel ? 'selected' : ''}>${esc(g)}</option>`).join('')
+  + '<option value="__new__">＋ Nouveau genre…</option>';
+
+function renderGroups(run) {
+  const groups = new Map();
+  (run.items || []).forEach(it => { const k = it.album_key || ('#' + it.idx); groups.has(k) ? groups.get(k).push(it) : groups.set(k, [it]); });
+  return [...groups.values()].map(items => {
+    if (items.length < 2) return itemRow(run, items[0]);
+    const f = items[0].final || {}, editable = run.status === 'ready';
+    const pending = items.filter(i => i.status === 'pending');
+    const first = items[0], img = first.cover_change ? `api/cleanup/${run.id}/cover/${first.idx}/new`
+      : (first.cover_info && first.cover_info.present ? `api/cleanup/${run.id}/cover/${first.idx}/old` : '');
+    const genresSet = [...new Set(items.map(i => (i.final || {}).genre || ''))];
+    return `<section class="group" data-idxs="${pending.map(i => i.idx).join(',')}">
+      <div class="ghead">
+        ${editable && pending.length ? `<input type="checkbox" data-gpick ${pending.every(i => i.checked) ? 'checked' : ''}>` : ''}
+        ${img ? `<img src="${img}" alt="">` : '<div class="nocov">♪</div>'}
+        <div class="body"><b>${esc(f.album || 'Sans album')}</b>
+          <div class="m">${esc(f.albumartist || f.artist || '')} · ${items.length} fichiers${pending.length < items.length ? ` (${pending.length} en attente)` : ''}</div>
+          ${editable && pending.length ? `<div class="row" style="margin-top:6px">
+            <select data-ggenre>${genreOptions(genresSet.length === 1 ? genresSet[0] : '')}</select>
+            <button class="ghost" data-greview>Ajuster l'album dans « À valider »</button></div>` : ''}
+        </div></div>
+      ${items.map(it => itemRow(run, it)).join('')}
+    </section>`;
+  }).join('');
+}
+
 async function loadDetail() {
   if (!current) { $('#detail').innerHTML = ''; return; }
   let run;
@@ -172,7 +208,7 @@ async function loadDetail() {
   if (run.status === 'done' && run.journal && run.journal.length)
     html += `<div class="toolbar"><button class="ghost" data-undo>Annuler ce nettoyage (${run.journal.length} fichier(s))</button></div>`;
   if (!busy) html += `<div class="row" style="justify-content:flex-end"><button class="ghost" data-delete>Supprimer de l'historique</button></div>`;
-  html += (run.items || []).map(it => itemRow(run, it)).join('') || (busy ? '' : '<p class="empty">Aucune correction proposée.</p>');
+  html += renderGroups(run) || (busy ? '' : '<p class="empty">Aucune correction proposée.</p>');
   const detail = $('#detail');
   const picks = {}; detail.querySelectorAll('[data-pick]').forEach(c => picks[c.closest('[data-idx]').dataset.idx] = c.checked);
   detail.innerHTML = html;
@@ -182,7 +218,26 @@ async function loadDetail() {
 }
 function updateCount() { const n = document.querySelectorAll('[data-pick]:checked').length; const el = $('[data-count]'); if (el) el.textContent = n; }
 
-$('#detail').addEventListener('change', e => { if (e.target.matches('[data-pick]')) updateCount(); });
+$('#detail').addEventListener('change', async e => {
+  if (e.target.matches('[data-pick]')) updateCount();
+  if (e.target.matches('[data-gpick]')) {
+    e.target.closest('.group').querySelectorAll('[data-pick]').forEach(c => c.checked = e.target.checked); updateCount();
+  }
+  if (e.target.matches('[data-ggenre]')) {
+    let genre = e.target.value;
+    const idxs = e.target.closest('.group').dataset.idxs.split(',').filter(Boolean).map(Number);
+    try {
+      if (genre === '__new__') {
+        genre = (prompt('Nom du nouveau genre :') || '').trim();
+        if (!genre) { e.target.value = ''; return; }
+        const r = await api('api/genres', {action: 'add', name: genre}); genres = r.genres; genre = r.result;
+      }
+      if (!genre) return;
+      await api(`api/cleanup/${current}/genre`, {idxs, genre});
+      await loadDetail();
+    } catch (x) { alert(x.message); }
+  }
+});
 $('#detail').addEventListener('click', async e => {
   const t = e.target;
   if (t.matches('[data-all]') || t.matches('[data-none]')) { document.querySelectorAll('[data-pick]').forEach(c => c.checked = t.matches('[data-all]')); updateCount(); }
@@ -197,6 +252,12 @@ $('#detail').addEventListener('click', async e => {
   }
   if (t.matches('[data-delete]') && confirm('Supprimer ce nettoyage de l’historique ? Il ne pourra plus être annulé.')) {
     try { await api(`api/cleanup/${current}/delete`, {}); current = null; await loadRuns(); loadDetail(); } catch (x) { alert(x.message); }
+  }
+  if (t.matches('[data-greview]')) {
+    const idxs = t.closest('.group').dataset.idxs.split(',').filter(Boolean).map(Number);
+    if (!confirm(`Envoyer les ${idxs.length} fichiers de cet album vers « À valider » ?`)) return;
+    try { await api(`api/cleanup/${current}/review-many`, {idxs}); location.href = 'valider'; } catch (x) { alert(x.message); }
+    return;
   }
   if (t.matches('[data-review]')) {
     try { await api(`api/cleanup/${current}/review`, {idx: +t.closest('[data-idx]').dataset.idx}); loadDetail(); }

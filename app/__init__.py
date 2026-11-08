@@ -389,6 +389,17 @@ def cleanup_review(run_id):
     return _cleanup_action(manager.cleanup.send_to_review, run_id, (request.get_json(silent=True) or {}).get("idx"))
 
 
+@app.post("/api/cleanup/<run_id>/genre")
+def cleanup_genre(run_id):
+    d = request.get_json(silent=True) or {}
+    return _cleanup_action(manager.cleanup.set_genre, run_id, d.get("idxs") or [], d.get("genre"))
+
+
+@app.post("/api/cleanup/<run_id>/review-many")
+def cleanup_review_many(run_id):
+    return _cleanup_action(manager.cleanup.send_many_to_review, run_id, (request.get_json(silent=True) or {}).get("idxs") or [])
+
+
 @app.post("/api/cleanup/<run_id>/delete")
 def cleanup_delete(run_id):
     return _cleanup_action(manager.cleanup.delete, run_id)

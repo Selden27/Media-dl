@@ -221,7 +221,13 @@ class Cleanup:
                     c, nh = it["current"], it["name_hints"]
                     title = c.get("title") or nh["title"]
                     t = None
-                    if base and base["confidence"] >= 0.6:
+                    if base and not (base.get("release_id") or base.get("discogs_release_id")) and key[1]:
+                        # The album's first track is in no database: the others won't be either.
+                        # Keep their own tags, share the genre / cover found for the album.
+                        t = {"confidence": base["confidence"], "source": base.get("source"), "genre": base.get("genre"),
+                             "cover": base.get("cover"), "cover_source": base.get("cover_source"),
+                             "unmapped_genres": base.get("unmapped_genres")}
+                    elif base and base["confidence"] >= 0.6:
                         try:
                             t = musicmeta.track_in_release(base, title)
                         except Exception:
@@ -240,9 +246,20 @@ class Cleanup:
                             t = None
                         if t and not base:
                             base = t
+                        if t:
+                            lib.record_unmapped(t.get("unmapped_genres") or [], t.get("artist"), t.get("genre_consensus") or [])
                     it["ident"] = t
 
             # 3. proposals
+            if opts.get("tags"):
+                for group in groups.values():
+                    titles = [(it["current"].get("title") or "") for it in group]
+                    if len(group) >= 2 and all(" - " in t for t in titles):
+                        prefixes = {t.split(" - ", 1)[0] for t in titles}
+                        if len(prefixes) == 1:
+                            prefix = next(iter(prefixes))
+                            for it in group:
+                                it["strip_prefix"] = prefix
             for it in items:
                 self._propose(run_id, run, it)
                 it.pop("ident", None)
@@ -254,7 +271,8 @@ class Cleanup:
             for path, its in targets.items():
                 if len(its) > 1:
                     for it in its:
-                        it.update(conflict="plusieurs fichiers visent ce chemin", checked=False)
+                        others = ", ".join(o["path"] for o in its if o is not it)
+                        it.update(conflict=f"doublon probable : même destination que {others}", checked=False)
                 elif self.m.pcloud.path_exists(its[0]["new_path"]):
                     its[0].update(conflict="un fichier existe déjà à cet endroit", checked=False)
             clean = [it for it in items if not it["has_changes"]]
@@ -292,6 +310,14 @@ class Cleanup:
                     from_ident = True
                 else:
                     ids_changed = True
+        if it.get("strip_prefix") and (final.get("title") or "").startswith(it["strip_prefix"] + " - "):
+            stripped = final["title"][len(it["strip_prefix"]) + 3:].strip()
+            if stripped:
+                changes["title"] = [cur.get("title"), stripped]
+                final["title"] = stripped
+        if opts.get("tags") and not final.get("albumartist") and final.get("artist"):
+            final["albumartist"] = final["artist"]
+            changes["albumartist"] = [cur.get("albumartist"), final["albumartist"]]
         if opts.get("tags") and not final.get("title") and it["name_hints"]["title"]:
             final["title"] = it["name_hints"]["title"]
             changes["title"] = [cur.get("title"), final["title"]]
@@ -327,6 +353,7 @@ class Cleanup:
                 new_path = None
 
         has_changes = bool(changes or cover_change or new_path or ids_changed)
+        it["album_key"] = f"{(final.get('albumartist') or final.get('artist') or '').lower()}|{(final.get('album') or '').lower()}"
         it.update(final=final, changes=changes, ids_changed=ids_changed, cover_change=cover_change,
                   cover_source=cover_source, new_path=new_path, confidence=conf,
                   source=(t or {}).get("source"), has_changes=has_changes, conflict=None, status="pending",
@@ -444,6 +471,30 @@ class Cleanup:
                      message="Nettoyage annulé." if not errors else "Annulation incomplète : " + " ; ".join(errors[:3]),
                      progress=100)
         self._save()
+
+    def set_genre(self, run_id, idxs, genre):
+        """Album-wide genre chosen on the report: becomes the proposed genre of those files."""
+        genre = self.m.library._find(genre) if genre else None
+        if not genre:
+            raise RuntimeError("Genre inconnu.")
+        idxs = {int(i) for i in idxs}
+        with self.lock:
+            run = self.runs.get(run_id)
+            if not run or run["status"] != "ready":
+                raise RuntimeError("Ce nettoyage n'est plus modifiable.")
+            for it in run["items"]:
+                if it["idx"] in idxs and it["status"] == "pending":
+                    it["final"]["genre"] = genre
+                    if genre != it["current"].get("genre"):
+                        it["changes"]["genre"] = [it["current"].get("genre"), genre]
+                    else:
+                        it["changes"].pop("genre", None)
+                    it["checked"] = not it.get("conflict")
+        self._save()
+        return genre
+
+    def send_many_to_review(self, run_id, idxs):
+        return [self.send_to_review(run_id, i) for i in idxs]
 
     # ----------------------------------------------- send to the review page
     def send_to_review(self, run_id, idx):
