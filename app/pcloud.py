@@ -198,6 +198,51 @@ class PCloud:
                     fh.write(chunk)
         return dest
 
+    def list_files(self, path, extensions=(".mp3",)):
+        """Every file under `path` (recursive): [{fileid, path, name, size, modified, folderid}]."""
+        data = self.call("listfolder", path="/" + path.strip("/"), recursive=1)
+        out = []
+
+        def walk(meta, base):
+            for item in meta.get("contents") or []:
+                p = f"{base.rstrip('/')}/{item['name']}"
+                if item.get("isfolder"):
+                    walk(item, p)
+                elif item["name"].lower().endswith(extensions):
+                    out.append({"fileid": item["fileid"], "path": p, "name": item["name"], "size": item.get("size"),
+                                "modified": item.get("modified"), "folderid": item.get("parentfolderid")})
+        walk(data["metadata"], "/" + path.strip("/"))
+        return sorted(out, key=lambda f: f["path"].lower())
+
+    def list_subfolders(self, path):
+        data = self.call("listfolder", path="/" + path.strip("/"), nofiles=1)
+        return sorted((i["name"] for i in data["metadata"].get("contents") or [] if i.get("isfolder")), key=str.lower)
+
+    def read_head(self, fileid, max_bytes=8 << 20):
+        """First bytes of a file: the whole ID3 tag (tags + cover) without the audio."""
+        data = self.call("getfilelink", fileid=fileid)
+        url = f"https://{data['hosts'][0]}{data['path']}"
+        head = requests.get(url, headers={"Range": "bytes=0-9"}, timeout=30).content[:10]
+        if len(head) < 10 or head[:3] != b"ID3":
+            return head
+        size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9]  # syncsafe integer
+        total = min(size + 20, max_bytes)
+        return requests.get(url, headers={"Range": f"bytes=0-{total - 1}"}, timeout=60).content
+
+    def move(self, fileid, folder_path, name):
+        """Move and/or rename a stored file without uploading it again."""
+        folder_id = self.ensure_folder(folder_path)
+        data = self.call("renamefile", fileid=fileid, tofolderid=folder_id, toname=name)
+        meta = data["metadata"]
+        return {"name": meta["name"], "path": f"{folder_path.rstrip('/')}/{meta['name']}", "fileid": meta.get("fileid")}
+
+    def path_exists(self, path):
+        try:
+            self.call("stat", path=path)
+            return True
+        except PCloudError:
+            return False
+
     def delete(self, fileid):
         return self.call("deletefile", fileid=fileid)
 

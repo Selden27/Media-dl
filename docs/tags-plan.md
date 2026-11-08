@@ -53,7 +53,7 @@ Fichiers : `app/data/genres.txt` (liste) et `app/data/genre_map.txt` (correspond
 - **AcoustID** (empreinte audio `fpcalc`) pour les titres mal nommés.
 - Clés à saisir dans Coolify : `ACOUSTID_API_KEY`, `DISCOGS_TOKEN`, `LASTFM_API_KEY`.
 
-### Étape 4 : nettoyage de la bibliothèque existante
+### Étape 4 : nettoyage de la bibliothèque existante ✅ (livrée — page /nettoyer)
 - Choix d'un dossier pCloud et des corrections : pochettes, tags, genre, renommage et rangement.
 - Analyse sans rien modifier : lecture du seul début des fichiers (tags et pochette), puis identification.
 - Rapport avant/après : la confiance élevée est pré-cochée, le reste est à valider.

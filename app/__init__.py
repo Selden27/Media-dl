@@ -312,3 +312,83 @@ def genres_update():
     except ValueError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True, result=result, genres=lib.genres)
+
+
+# ------------------------------------------------------------------ cleanup
+@app.get("/nettoyer")
+def cleanup_page():
+    return render_template("cleanup.html")
+
+
+@app.get("/api/cleanup")
+def cleanup_list():
+    from .cleanup import MAX_FILES
+    return jsonify(runs=manager.cleanup.list(), root=AUDIO_FOLDER, max_files=MAX_FILES, busy=manager.cleanup.busy())
+
+
+@app.get("/api/cleanup/folders")
+def cleanup_folders():
+    path = request.args.get("path") or AUDIO_FOLDER
+    try:
+        return jsonify(path="/" + path.strip("/"), folders=manager.pcloud.list_subfolders(path))
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.post("/api/cleanup/start")
+def cleanup_start():
+    d = request.get_json(silent=True) or {}
+    try:
+        run = manager.cleanup.start(d.get("folder") or AUDIO_FOLDER, d.get("root") or AUDIO_FOLDER,
+                                    {k: bool((d.get("options") or {}).get(k)) for k in ("tags", "genre", "covers", "rename")},
+                                    bool(d.get("recheck")))
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(id=run["id"])
+
+
+@app.get("/api/cleanup/<run_id>")
+def cleanup_get(run_id):
+    run = manager.cleanup.get(run_id)
+    if not run:
+        return jsonify(error="Introuvable"), 404
+    for it in run.get("items", []):  # the review page data is not needed here
+        it.pop("candidates", None)
+        it.pop("hints", None)
+    return jsonify(run)
+
+
+@app.get("/api/cleanup/<run_id>/cover/<int:idx>/<kind>")
+def cleanup_cover(run_id, idx, kind):
+    data = manager.cleanup.cover(run_id, idx, kind)
+    if not data:
+        abort(404)
+    return Response(data, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+def _cleanup_action(fn, *args):
+    try:
+        result = fn(*args)
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, result=result)
+
+
+@app.post("/api/cleanup/<run_id>/apply")
+def cleanup_apply(run_id):
+    return _cleanup_action(manager.cleanup.apply, run_id, (request.get_json(silent=True) or {}).get("selected") or [])
+
+
+@app.post("/api/cleanup/<run_id>/undo")
+def cleanup_undo(run_id):
+    return _cleanup_action(manager.cleanup.undo, run_id)
+
+
+@app.post("/api/cleanup/<run_id>/review")
+def cleanup_review(run_id):
+    return _cleanup_action(manager.cleanup.send_to_review, run_id, (request.get_json(silent=True) or {}).get("idx"))
+
+
+@app.post("/api/cleanup/<run_id>/delete")
+def cleanup_delete(run_id):
+    return _cleanup_action(manager.cleanup.delete, run_id)

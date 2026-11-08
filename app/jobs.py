@@ -16,6 +16,7 @@ import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget # Ajout ***Olivier***
 
 from . import musicmeta, sources, tagging
+from .cleanup import Cleanup
 from .library import Library
 from .review import EDITABLE, ReviewStore
 from .pcloud import PCloud
@@ -51,6 +52,8 @@ class JobManager:
         self.pcloud = PCloud.from_env()
         self.library = Library()
         self.review = ReviewStore()
+        self.auto_confidence = AUTO_CONFIDENCE
+        self.cleanup = Cleanup(self)
         threading.Thread(target=self._self_test, daemon=True).start()
 
     @staticmethod
@@ -576,5 +579,7 @@ class JobManager:
             label = next((c["label"] for c in item.get("covers", []) if c["name"] == cover_name), "")
             cover_source = label.split(" (")[0] or None
         self._job_file_validated(item, res, tags, cover, cover_source)
+        if item.get("cleanup_run"):
+            self.cleanup.on_validated(item, res)
         self.review.remove(item_id)
         return res["path"]

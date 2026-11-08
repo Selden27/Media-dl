@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%234f46e5%22/%3E%3Cpath%20d%3D%22M26%2014v24.5A7.5%207.5%200%201%200%2031%2045V22l15-4v14.5A7.5%207.5%200%201%200%2051%2039V9z%22%20fill%3D%22%23fff%22/%3E%3C/svg%3E">
+<meta name="theme-color" content="#4f46e5">
+<title>Nettoyer · Media DL</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#16181d;--muted:#667085;--line:#e4e7ec;--accent:#4f46e5;--ok:#12805c;--err:#c0362c;--warn:#d97706}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--text:#e8eaf0;--muted:#98a2b3;--line:#2a2f3a;--accent:#818cf8;--ok:#34d399;--err:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+a{color:var(--accent)}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:16px;margin:26px 0 8px}
+.sub,.m{color:var(--muted)} .m{font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 3px}
+input[type=text]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:inherit;font:inherit}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row input[type=text]{flex:1 1 220px;width:auto}
+.check{display:flex;gap:6px;align-items:center;font-size:14px;color:var(--text);margin:4px 14px 4px 0}
+button{padding:8px 14px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:400;padding:6px 10px;font-size:13px}
+button:disabled{opacity:.55;cursor:default}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer;background:var(--bg)}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:6px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent);transition:width .4s}
+.run{display:flex;justify-content:space-between;gap:10px;align-items:center;cursor:pointer}
+.run.sel{outline:2px solid var(--accent)}
+.badge{font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.b-ok{border-color:var(--ok);color:var(--ok)} .b-err{border-color:var(--err);color:var(--err)} .b-warn{border-color:var(--warn);color:var(--warn)}
+.toolbar{position:sticky;top:0;z-index:2;background:var(--bg);padding:8px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.item{display:flex;gap:10px;align-items:flex-start}
+.item>input{margin-top:6px;width:18px;height:18px;flex:none}
+.covs{display:flex;align-items:center;gap:4px;flex:none}
+.covs img,.covs .nocov{width:48px;height:48px;border-radius:6px;object-fit:cover;background:var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
+.body{min-width:0;flex:1}
+.path{font-size:13px;word-break:break-all}
+.newpath{font-size:13px;word-break:break-all;color:var(--ok)}
+.diff{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.d{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+.d s{color:var(--muted)}
+.conf{color:var(--err);font-size:13px}
+.empty{color:var(--muted)}
+.err{color:var(--err);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <p class="m"><a href="./">← Media DL</a> · <a href="valider">À valider</a> · <a href="genres">Mes genres</a></p>
+  <h1>Nettoyer ma bibliothèque</h1>
+  <p class="sub">Analyse un dossier pCloud sans rien modifier, propose les corrections, puis applique celles que tu coches. L'audio n'est jamais réencodé ; chaque nettoyage peut être annulé.</p>
+
+  <div class="card">
+    <label>Dossier à nettoyer</label>
+    <div class="row"><input type="text" id="folder"><button class="ghost" id="browse">Parcourir</button></div>
+    <div class="chips" id="folders"></div>
+    <label>Racine de la bibliothèque <span class="m">(le rangement « Artiste/Album/NN - Titre » part de ce dossier)</span></label>
+    <input type="text" id="root">
+    <label>Corrections</label>
+    <div class="row">
+      <label class="check"><input type="checkbox" data-opt="covers" checked> Pochettes</label>
+      <label class="check"><input type="checkbox" data-opt="tags" checked> Tags</label>
+      <label class="check"><input type="checkbox" data-opt="genre" checked> Genre</label>
+      <label class="check"><input type="checkbox" data-opt="rename" checked> Renommage et rangement</label>
+    </div>
+    <label class="check"><input type="checkbox" id="recheck"> Réanalyser aussi les fichiers déjà traités</label>
+    <div class="row" style="margin-top:10px"><button id="start">Analyser</button><span class="m" id="startInfo"></span></div>
+    <div class="err" id="startErr"></div>
+  </div>
+
+  <h2>Nettoyages</h2>
+  <div id="runs"><p class="empty">Aucun nettoyage pour l'instant.</p></div>
+  <div id="detail"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const STATUS = {listing: 'liste des fichiers', analyzing: 'analyse', ready: 'à vérifier', applying: 'application', done: 'terminé',
+                undoing: 'annulation', undone: 'annulé', error: 'erreur'};
+const ITEM = {applied: ['corrigé', 'b-ok'], error: ['erreur', 'b-err'], skipped: ['non appliqué', ''], review: ['envoyé à « À valider »', 'b-warn']};
+const LABELS = {title: 'Titre', artist: 'Artiste', albumartist: "Artiste de l'album", album: 'Album', track: 'Piste', total_tracks: 'Nb pistes',
+                disc: 'Disque', total_discs: 'Nb disques', year: 'Année', label: 'Label', genre: 'Genre'};
+let current = null, maxFiles = 100;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function browse(path) {
+  try {
+    const d = await api('api/cleanup/folders?path=' + encodeURIComponent(path));
+    $('#folder').value = d.path;
+    const up = d.path.split('/').slice(0, -1).join('/') || '/';
+    $('#folders').innerHTML = (d.path !== '/' ? `<span class="chip" data-path="${esc(up)}">⬆ dossier parent</span>` : '')
+      + d.folders.map(f => `<span class="chip" data-path="${esc(d.path.replace(/\/$/, '') + '/' + f)}">📁 ${esc(f)}</span>`).join('');
+  } catch (e) { $('#folders').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+$('#browse').onclick = () => browse($('#folder').value || '/');
+$('#folders').onclick = e => { const c = e.target.closest('[data-path]'); if (c) browse(c.dataset.path); };
+
+$('#start').onclick = async () => {
+  $('#startErr').textContent = '';
+  const options = {}; document.querySelectorAll('[data-opt]').forEach(c => options[c.dataset.opt] = c.checked);
+  try {
+    const r = await api('api/cleanup/start', {folder: $('#folder').value, root: $('#root').value, options, recheck: $('#recheck').checked});
+    current = r.id; await loadRuns(); await loadDetail();
+  } catch (e) { $('#startErr').textContent = e.message; }
+};
+
+async function loadRuns() {
+  const d = await api('api/cleanup');
+  maxFiles = d.max_files;
+  if (!$('#root').value) $('#root').value = d.root;
+  if (!$('#folder').value) $('#folder').value = d.root;
+  $('#startInfo').textContent = `${maxFiles} fichiers maximum par nettoyage ; les fichiers déjà traités sont sautés.`;
+  $('#start').disabled = d.busy;
+  $('#runs').innerHTML = d.runs.length ? d.runs.map(r => `<div class="card run ${r.id === current ? 'sel' : ''}" data-run="${r.id}">
+      <div><b>${esc(r.folder)}</b> <span class="m">· ${new Date(r.created * 1000).toLocaleString('fr-FR')}</span>
+        <div class="m">${esc(r.message || '')}</div>
+        ${['listing','analyzing','applying','undoing'].includes(r.status) ? `<div class="bar"><i style="width:${r.progress}%"></i></div>` : ''}</div>
+      <span class="badge ${r.status === 'done' ? 'b-ok' : r.status === 'error' ? 'b-err' : ''}">${STATUS[r.status] || r.status}</span></div>`).join('')
+    : '<p class="empty">Aucun nettoyage pour l\'instant.</p>';
+  if (!current && d.runs.length) current = d.runs[0].id;
+}
+$('#runs').onclick = e => { const r = e.target.closest('[data-run]'); if (r) { current = r.dataset.run; loadRuns(); loadDetail(); } };
+
+function itemRow(run, it) {
+  const editable = run.status === 'ready' && it.status === 'pending';
+  const old = it.cover_info && it.cover_info.present ? `<img src="api/cleanup/${run.id}/cover/${it.idx}/old" alt="">` : '<div class="nocov">∅</div>';
+  const covers = it.cover_change ? `${old}<span>→</span><img src="api/cleanup/${run.id}/cover/${it.idx}/new" alt="" title="${esc(it.cover_source || '')}">` : old;
+  const diffs = Object.entries(it.changes || {}).map(([k, [a, b]]) => `<span class="d">${LABELS[k] || k} : <s>${esc(a ?? '—')}</s> → <b>${esc(b)}</b></span>`).join('')
+    + (it.cover_change ? `<span class="d">Pochette → <b>${esc(it.cover_source || 'nouvelle')}</b></span>` : '')
+    + (it.ids_changed && !Object.keys(it.changes || {}).length ? '<span class="d">Identifiants MusicBrainz/Discogs ajoutés</span>' : '');
+  const st = ITEM[it.status];
+  return `<div class="card item" data-idx="${it.idx}">
+    ${editable ? `<input type="checkbox" data-pick ${it.checked ? 'checked' : ''}>` : ''}
+    <div class="covs">${covers}</div>
+    <div class="body">
+      <div class="path">${esc(it.path)}</div>
+      ${it.new_path ? `<div class="newpath">→ ${esc(it.new_path)}</div>` : ''}
+      <div class="diff">${diffs}</div>
+      <div class="m">${it.confidence != null ? `confiance ${Math.round(it.confidence * 100)} % · ${esc(it.source || '')}` : 'sans recherche en ligne'}
+        ${st ? ` <span class="badge ${st[1]}">${st[0]}</span>` : ''}</div>
+      ${it.conflict ? `<div class="conf">⚠ ${esc(it.conflict)}</div>` : ''}
+      ${it.error ? `<div class="err">${esc(it.error)}</div>` : ''}
+      ${editable ? `<div class="row" style="margin-top:6px"><button class="ghost" data-review>Ajuster dans « À valider »</button></div>` : ''}
+    </div></div>`;
+}
+
+async function loadDetail() {
+  if (!current) { $('#detail').innerHTML = ''; return; }
+  let run;
+  try { run = await api('api/cleanup/' + current); } catch (e) { $('#detail').innerHTML = ''; return; }
+  const busy = ['listing','analyzing','applying','undoing'].includes(run.status);
+  let html = `<h2>Résultat · ${esc(run.folder)}</h2><p class="m">${esc(run.message || '')}
+    ${run.found ? ` · ${run.found} MP3 trouvés, ${run.skipped} déjà traités` + (run.clean != null ? `, ${run.clean} déjà propres` : '') : ''}</p>`;
+  if (busy) html += `<div class="bar"><i style="width:${run.progress}%"></i></div>`;
+  if (run.status === 'ready' && run.items.length) {
+    const sel = run.items.filter(i => i.checked && i.status === 'pending').length;
+    html += `<div class="toolbar"><button data-apply>Appliquer la sélection (<span data-count>${sel}</span>)</button>
+      <button class="ghost" data-all>Tout cocher</button><button class="ghost" data-none>Tout décocher</button>
+      <span class="m">Cochés d'office : changements sûrs (confiance élevée, sans conflit).</span></div>`;
+  }
+  if (run.status === 'done' && run.journal && run.journal.length)
+    html += `<div class="toolbar"><button class="ghost" data-undo>Annuler ce nettoyage (${run.journal.length} fichier(s))</button></div>`;
+  if (!busy) html += `<div class="row" style="justify-content:flex-end"><button class="ghost" data-delete>Supprimer de l'historique</button></div>`;
+  html += (run.items || []).map(it => itemRow(run, it)).join('') || (busy ? '' : '<p class="empty">Aucune correction proposée.</p>');
+  const detail = $('#detail');
+  const picks = {}; detail.querySelectorAll('[data-pick]').forEach(c => picks[c.closest('[data-idx]').dataset.idx] = c.checked);
+  detail.innerHTML = html;
+  detail.querySelectorAll('[data-pick]').forEach(c => { const k = c.closest('[data-idx]').dataset.idx; if (k in picks) c.checked = picks[k]; });
+  updateCount();
+  return busy;
+}
+function updateCount() { const n = document.querySelectorAll('[data-pick]:checked').length; const el = $('[data-count]'); if (el) el.textContent = n; }
+
+$('#detail').addEventListener('change', e => { if (e.target.matches('[data-pick]')) updateCount(); });
+$('#detail').addEventListener('click', async e => {
+  const t = e.target;
+  if (t.matches('[data-all]') || t.matches('[data-none]')) { document.querySelectorAll('[data-pick]').forEach(c => c.checked = t.matches('[data-all]')); updateCount(); }
+  if (t.matches('[data-apply]')) {
+    const selected = [...document.querySelectorAll('[data-pick]:checked')].map(c => +c.closest('[data-idx]').dataset.idx);
+    if (!selected.length) return alert('Aucun fichier coché.');
+    if (!confirm(`Appliquer les corrections à ${selected.length} fichier(s) ? Les fichiers non cochés ne seront plus proposés au prochain nettoyage (sauf avec « Réanalyser »).`)) return;
+    try { await api(`api/cleanup/${current}/apply`, {selected}); poll(); } catch (x) { alert(x.message); }
+  }
+  if (t.matches('[data-undo]') && confirm('Annuler toutes les corrections de ce nettoyage ?')) {
+    try { await api(`api/cleanup/${current}/undo`, {}); poll(); } catch (x) { alert(x.message); }
+  }
+  if (t.matches('[data-delete]') && confirm('Supprimer ce nettoyage de l’historique ? Il ne pourra plus être annulé.')) {
+    try { await api(`api/cleanup/${current}/delete`, {}); current = null; await loadRuns(); loadDetail(); } catch (x) { alert(x.message); }
+  }
+  if (t.matches('[data-review]')) {
+    try { await api(`api/cleanup/${current}/review`, {idx: +t.closest('[data-idx]').dataset.idx}); loadDetail(); }
+    catch (x) { alert(x.message); }
+  }
+});
+
+let timer;
+async function poll() {
+  clearTimeout(timer);
+  await loadRuns();
+  const busy = await loadDetail();
+  if (busy) timer = setTimeout(poll, 2000);
+}
+poll();
+</script>
+</body>
+</html>

@@ -11,14 +11,33 @@ TO_SORT_FOLDER = os.getenv("MUSIC_TO_SORT_FOLDER", "_A trier")
 UNKNOWN_ARTIST = "Artiste inconnu"
 
 
+TXXX_KEYS = (("MusicBrainz Album Id", "release_id"), ("MusicBrainz Artist Id", "artist_id"),
+             ("MusicBrainz Album Artist Id", "albumartist_id"), ("MusicBrainz Release Group Id", "release_group_id"),
+             ("MusicBrainz Release Track Id", "track_id"), ("MusicBrainz Album Type", "release_type"),
+             ("DISCOGS_RELEASE_ID", "discogs_release_id"))
+# Frames the app manages. Anything else (lyrics, personal comments, ratings, ReplayGain…) is kept.
+MANAGED = ("TIT2", "TPE1", "TPE2", "TALB", "TRCK", "TPOS", "TDRC", "TYER", "TDAT", "TIME", "TORY", "TDOR", "TCON",
+           "TPUB", "TSRC", "TCMP", "WOAS", "APIC")
+
+
 def write_tags(path, t):
-    """Replace every tag in `path` with the ones in `t` (dict from musicmeta.identify)."""
+    """Write the fields of `t` (dict from musicmeta.identify) into `path`, as ID3v2.3.
+
+    Only the frames the app manages are replaced; a managed field missing from `t` is removed.
+    Other frames already in the file are left untouched."""
     try:
         id3 = ID3(path)
-        id3.delete(path)
     except ID3NoHeaderError:
-        pass
-    id3 = ID3()
+        id3 = ID3()
+    for fid in MANAGED:
+        id3.delall(fid)
+    for desc, _ in TXXX_KEYS:
+        id3.delall(f"TXXX:{desc}")
+    for key in [k for k in id3.keys() if k.startswith("UFID:http://musicbrainz.org")]:
+        del id3[key]
+    for frame in list(id3.getall("COMM")):
+        if str(frame).startswith("Source : "):
+            id3.delall(frame.HashKey)
 
     def text(frame, value):
         if value not in (None, ""):
@@ -40,22 +59,50 @@ def write_tags(path, t):
     text(TSRC, t.get("isrc"))
     if t.get("compilation"):
         text(TCMP, "1")
-    for desc, key in (("MusicBrainz Album Id", "release_id"), ("MusicBrainz Artist Id", "artist_id"),
-                      ("MusicBrainz Album Artist Id", "albumartist_id"),
-                      ("MusicBrainz Release Group Id", "release_group_id"),
-                      ("MusicBrainz Release Track Id", "track_id"), ("MusicBrainz Album Type", "release_type")):
+    for desc, key in TXXX_KEYS:
         if t.get(key):
             id3.add(TXXX(encoding=3, desc=desc, text=str(t[key]).lower() if key == "release_type" else str(t[key])))
-    if t.get("discogs_release_id"):
-        id3.add(TXXX(encoding=3, desc="DISCOGS_RELEASE_ID", text=str(t["discogs_release_id"])))
     if t.get("recording_id"):
-        id3.add(UFID(owner="http://musicbrainz.org", data=t["recording_id"].encode()))
+        id3.add(UFID(owner="http://musicbrainz.org", data=str(t["recording_id"]).encode()))
     if t.get("url"):
         id3.add(WOAS(url=t["url"]))
         id3.add(COMM(encoding=3, lang="fra", desc="", text=f"Source : {t['url']}"))
     if t.get("cover"):
         id3.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=t["cover"]))
     id3.save(path, v2_version=3)
+
+
+def read_tags(id3):
+    """Current tags of a file (mutagen ID3 object) as a dict with the same keys as write_tags."""
+    def first(fid):
+        frame = id3.get(fid)
+        return str(frame.text[0]).strip() if frame is not None and getattr(frame, "text", None) else None
+
+    def pair(value):
+        if not value:
+            return None, None
+        a, _, b = value.partition("/")
+        return (int(a) if a.strip().isdigit() else None), (int(b) if b.strip().isdigit() else None)
+
+    t = {"title": first("TIT2"), "artist": first("TPE1"), "albumartist": first("TPE2"), "album": first("TALB"),
+         "genre": first("TCON"), "label": first("TPUB"), "isrc": first("TSRC"),
+         "compilation": first("TCMP") == "1"}
+    t["track"], t["total_tracks"] = pair(first("TRCK"))
+    t["disc"], t["total_discs"] = pair(first("TPOS"))
+    date = first("TDRC") or first("TYER")
+    t["date"] = date
+    t["year"] = date[:4] if date and date[:4].isdigit() else None
+    t["original_date"] = first("TDOR") or first("TORY")
+    for desc, key in TXXX_KEYS:
+        t[key] = first(f"TXXX:{desc}")
+    ufid = next((id3[k] for k in id3.keys() if k.startswith("UFID:http://musicbrainz.org")), None)
+    t["recording_id"] = ufid.data.decode(errors="ignore") if ufid is not None else None
+    woas = id3.get("WOAS")
+    t["url"] = woas.url if woas is not None else None
+    pics = id3.getall("APIC")
+    pic = next((p for p in pics if p.type == 3), pics[0] if pics else None)
+    t["cover"] = pic.data if pic is not None else None
+    return t
 
 
 # ---------------------------------------------------------------- paths

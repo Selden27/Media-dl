@@ -295,6 +295,14 @@ def fetch_cover(release_id, release_group_id):
     return None, None
 
 
+def thumbnail_cover_bytes(data):
+    """An existing cover cropped to a square (video thumbnails embedded as covers)."""
+    try:
+        return _to_jpeg(data, square=True)
+    except Exception:
+        return None
+
+
 def thumbnail_cover(path):
     """Fallback: the video thumbnail, cropped to a square."""
     try:
@@ -553,3 +561,40 @@ def candidate_details(cand, hints):
             t["albumartist"] = "Various Artists"
         t["cover"], t["cover_source"] = fetch_cover(rel_id, t.get("release_group_id"))
     return t
+
+
+def track_in_release(base, title):
+    """Tags for another track of the release `base` was matched to (no new search).
+
+    Used by the library cleanup: an album is identified once, its other tracks are found
+    in the same tracklist by title. Returns None when the title is not in the tracklist."""
+    if base.get("release_id"):
+        rel = _mb_get(f"release/{base['release_id']}", inc="artist-credits+labels+recordings+release-groups+isrcs") or {}
+        tracks = [tr for m in rel.get("media") or [] for tr in m.get("tracks") or []]
+        match = max(tracks, key=lambda tr: _sim(title, tr.get("title")), default=None)
+        if not match or _sim(title, match.get("title")) < 0.85:
+            return None
+        rec = match.get("recording") or {}
+        t = {k: v for k, v in release_details(base["release_id"], rec.get("id")).items() if v is not None}
+        t.update(title=match.get("title"), artist=_credit(match.get("artist-credit") or rec.get("artist-credit")) or base.get("artist"),
+                 recording_id=rec.get("id"), source=base.get("source"), confidence=base["confidence"])
+        if t.get("date"):
+            t["year"] = t["date"][:4]
+        if t.get("compilation"):
+            t["albumartist"] = "Various Artists"
+        return t
+    if base.get("discogs_release_id"):
+        rel = sources.discogs_release(base["discogs_release_id"]) or {}
+        tracklist = rel.get("tracklist") or []
+        entries = [tr for tr in tracklist if tr.get("type_", "track") == "track"]
+        match = max(entries, key=lambda tr: _sim(title, tr.get("title")), default=None)
+        if not match or _sim(title, match.get("title")) < 0.85:
+            return None
+        track, disc = _track_number(match.get("position"), tracklist, match)
+        artists = match.get("artists") or rel.get("artists") or []
+        return {"title": match.get("title"), "artist": ", ".join(sources._discogs_artist(a.get("name")) for a in artists) or base.get("artist"),
+                "album": base.get("album"), "albumartist": base.get("albumartist"), "track": track, "disc": disc,
+                "total_tracks": len(entries), "year": base.get("year"), "label": base.get("label"),
+                "discogs_release_id": base["discogs_release_id"], "source": base.get("source"),
+                "confidence": base["confidence"], "compilation": base.get("compilation")}
+    return None

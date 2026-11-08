@@ -16,6 +16,14 @@ pochette officielle (Cover Art Archive, sinon la miniature recadrée en carré) 
 Si la confiance est suffisante, le fichier est rangé selon `MUSIC_PATH_TEMPLATE` ; sinon il part dans `_A trier`.
 Réglages persistants : `/data/library.json`. Plan complet : [docs/tags-plan.md](docs/tags-plan.md).
 
+## Pages
+
+- `/` : téléchargement, cartes récapitulatives des derniers téléchargements (bouton « Modifier »).
+- `/valider` : morceaux à vérifier (identification incertaine, genre manquant, modification, nettoyage), regroupés par album.
+- `/genres` : liste de genres, correspondances, artistes mémorisés.
+- `/nettoyer` : nettoyage de la bibliothèque existante (pochettes, tags, genre, renommage), 100 fichiers max par passage,
+  avec journal et annulation. Les tags sont modifiés sans toucher aux autres informations du fichier (paroles, commentaires…).
+
 ## Déploiement (Coolify)
 
 Application « Public repository », build pack **Dockerfile**, port **8000**.
