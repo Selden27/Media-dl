@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mes genres · Media DL</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#16181d;--muted:#667085;--line:#e4e7ec;--accent:#4f46e5;--ok:#12805c;--err:#c0362c;--warn:#d97706}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#171a21;--text:#e8eaf0;--muted:#98a2b3;--line:#2a2f3a;--accent:#818cf8;--ok:#34d399;--err:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 48px}
+a{color:var(--accent)}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:16px;margin:28px 0 8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+h2 small{font-weight:400;color:var(--muted);font-size:13px}
+.sub,.m{color:var(--muted)}
+.m{font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+input,select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:inherit;font:inherit;min-width:0}
+button{padding:8px 12px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:400;padding:5px 9px;font-size:13px}
+.addrow{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.addrow input{flex:1 1 200px}
+.addrow select{flex:1 1 140px}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+li:last-child{border-bottom:0}
+li .name{flex:1;min-width:0;word-break:break-word}
+li .count{font-size:12px;color:var(--muted)}
+.arrow{color:var(--muted)}
+.filter{width:100%;margin-bottom:8px}
+.err{color:var(--err);font-size:13px;min-height:1em}
+.empty{color:var(--muted);font-size:14px;padding:6px 0}
+</style>
+</head>
+<body>
+<main>
+  <p class="m"><a href="./">← Media DL</a> · <a href="valider">À valider</a></p>
+  <h1>Mes genres</h1>
+  <p class="sub">Ta liste de genres, les correspondances avec les genres trouvés en ligne, et le genre retenu pour chaque artiste. Les fichiers déjà enregistrés ne sont pas modifiés.</p>
+  <div class="err" id="err"></div>
+
+  <h2>Genres <small id="ngenres"></small></h2>
+  <div class="card">
+    <div class="addrow"><input id="newGenre" placeholder="Nouveau genre…"><button id="addGenre">Ajouter</button></div>
+    <ul id="genres"></ul>
+  </div>
+
+  <h2>Correspondances <small>genre trouvé en ligne → ton genre</small></h2>
+  <div class="card">
+    <div class="addrow"><input id="mapSrc" placeholder="Genre trouvé (ex. psybient)"><select id="mapDst"></select><button id="addMap">Ajouter</button></div>
+    <input class="filter" id="mapFilter" placeholder="Filtrer…">
+    <ul id="maps"></ul>
+  </div>
+
+  <h2>Artistes mémorisés <small>genre appliqué automatiquement</small></h2>
+  <div class="card">
+    <input class="filter" id="artFilter" placeholder="Filtrer…">
+    <ul id="artists"></ul>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let D = {genres: [], map: {}, artists: {}};
+
+async function post(body) {
+  $('#err').textContent = '';
+  const r = await fetch('api/genres', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#err').textContent = j.error || r.statusText; throw new Error(j.error); }
+  await load();
+  return j;
+}
+const options = sel => D.genres.map(g => `<option ${g === sel ? 'selected' : ''}>${esc(g)}</option>`).join('');
+
+function render() {
+  const uses = g => Object.values(D.map).filter(v => v === g).length + Object.values(D.artists).filter(v => v === g).length;
+  $('#ngenres').textContent = `${D.genres.length} genres`;
+  $('#genres').innerHTML = D.genres.map(g => `<li data-genre="${esc(g)}"><span class="name">${esc(g)}</span>
+      <span class="count">${uses(g) ? uses(g) + ' lien(s)' : ''}</span>
+      <button class="ghost" data-rename>Renommer</button><button class="ghost" data-delete>Supprimer</button></li>`).join('');
+  $('#mapDst').innerHTML = options();
+  const mf = $('#mapFilter').value.toLowerCase();
+  const maps = Object.entries(D.map).filter(([k, v]) => !mf || k.includes(mf) || v.toLowerCase().includes(mf)).sort();
+  $('#maps').innerHTML = maps.length ? maps.map(([k, v]) => `<li data-src="${esc(k)}"><span class="name">${esc(k)} <span class="arrow">→</span></span>
+      <select data-remap>${options(v)}</select><button class="ghost" data-unmap>Retirer</button></li>`).join('') : '<li class="empty">Aucune correspondance.</li>';
+  const af = $('#artFilter').value.toLowerCase();
+  const arts = Object.entries(D.artists).filter(([k, v]) => !af || k.includes(af) || v.toLowerCase().includes(af)).sort();
+  $('#artists').innerHTML = arts.length ? arts.map(([k, v]) => `<li data-artist="${esc(k)}"><span class="name">${esc(k)}</span>
+      <select data-reartist>${options(v)}</select><button class="ghost" data-unartist>Oublier</button></li>`).join('')
+    : '<li class="empty">Aucun artiste mémorisé pour l’instant : ils s’ajoutent quand tu valides un genre.</li>';
+}
+async function load() { D = await (await fetch('api/genres')).json(); render(); }
+
+$('#addGenre').onclick = () => { const n = $('#newGenre').value.trim(); if (n) post({action: 'add', name: n}).then(() => $('#newGenre').value = ''); };
+$('#newGenre').onkeydown = e => { if (e.key === 'Enter') $('#addGenre').click(); };
+$('#addMap').onclick = () => { const s = $('#mapSrc').value.trim(); if (s) post({action: 'map', source: s, target: $('#mapDst').value}).then(() => $('#mapSrc').value = ''); };
+$('#mapFilter').oninput = render; $('#artFilter').oninput = render;
+document.addEventListener('click', e => {
+  const li = e.target.closest('li');
+  if (!li) return;
+  if (e.target.matches('[data-rename]')) {
+    const n = prompt('Nouveau nom :', li.dataset.genre); if (n && n.trim() && n !== li.dataset.genre) post({action: 'rename', name: li.dataset.genre, new: n});
+  }
+  if (e.target.matches('[data-delete]') && confirm(`Supprimer « ${li.dataset.genre} » ? Ses correspondances et les artistes qui l’utilisent seront retirés.`))
+    post({action: 'delete', name: li.dataset.genre});
+  if (e.target.matches('[data-unmap]')) post({action: 'unmap', source: li.dataset.src});
+  if (e.target.matches('[data-unartist]')) post({action: 'unartist', artist: li.dataset.artist});
+});
+document.addEventListener('change', e => {
+  const li = e.target.closest('li');
+  if (li && e.target.matches('[data-remap]')) post({action: 'map', source: li.dataset.src, target: e.target.value});
+  if (li && e.target.matches('[data-reartist]')) post({action: 'artist', artist: li.dataset.artist, genre: e.target.value});
+});
+load();
+</script>
+</body>
+</html>

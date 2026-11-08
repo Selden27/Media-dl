@@ -50,7 +50,7 @@ button:disabled{opacity:.6}
 </head>
 <body>
 <main>
-  <p class="m"><a href="./">← Media DL</a></p>
+  <p class="m"><a href="./">← Media DL</a> · <a href="genres">Mes genres</a></p>
   <h1>À valider</h1>
   <p class="sub">Morceaux à vérifier : identification pas assez sûre (rangés dans « _A trier »), genre manquant, ou téléchargements que tu as choisi de modifier. Corrige les tags puis valide : le fichier est mis à jour dans pCloud, et déplacé seulement si son chemin change.</p>
 
@@ -71,9 +71,33 @@ async function api(path, body) {
   return j;
 }
 
+// Set a field from code and remember it as the value to restore if "＋ Nouveau genre…" is cancelled.
+function setVal(el, v) { el.value = v; el.dataset.prev = v; }
+
 function genreOptions(selected) {
-  return '<option value="">— aucun —</option>' + genres.map(g => `<option ${g === selected ? 'selected' : ''}>${esc(g)}</option>`).join('');
+  return '<option value="">— aucun —</option>' + genres.map(g => `<option ${g === selected ? 'selected' : ''}>${esc(g)}</option>`).join('')
+    + '<option value="__new__">＋ Nouveau genre…</option>';
 }
+
+// "＋ Nouveau genre…": add it to the list and select it right away.
+document.addEventListener('focusin', e => { if (e.target.matches('select[data-f="genre"], select[data-g="genre"]') && e.target.value !== '__new__') e.target.dataset.prev = e.target.value; });
+document.addEventListener('change', async e => {
+  const sel = e.target;
+  if (!sel.matches('select[data-f="genre"], select[data-g="genre"]')) return;
+  if (sel.value !== '__new__') { sel.dataset.prev = sel.value; return; }
+  e.stopImmediatePropagation();
+  // previous value: last choice, else the value the list was drawn with
+  if (sel.dataset.prev === undefined) sel.dataset.prev = ([...sel.options].find(o => o.defaultSelected) || {}).value || '';
+  const name = (prompt('Nom du nouveau genre :') || '').trim();
+  if (!name) { sel.value = sel.dataset.prev; return; }
+  try {
+    const r = await api('api/genres', {action: 'add', name});
+    genres = r.genres;
+    document.querySelectorAll('select[data-f="genre"], select[data-g="genre"]').forEach(x => { const v = x === sel ? r.result : x.value; x.innerHTML = genreOptions(v); });
+    sel.dataset.prev = r.result;
+    if (sel.matches('[data-g]')) sel.closest('.group').querySelectorAll('.card[data-id] [data-f="genre"]').forEach(x => setVal(x, r.result));
+  } catch (x) { alert(x.message); sel.value = sel.dataset.prev || ''; }
+}, true);
 
 function suggestionBox(name, info) {
   const why = info && info.consensus ? 'plusieurs sources sont d’accord sur' : `vu ${info ? info.count : ''} fois :`;
@@ -176,13 +200,13 @@ document.addEventListener('input', e => {
   const head = e.target.closest('.ghead');
   if (!head || !e.target.dataset.g) return;
   head.parentElement.querySelectorAll(`.card[data-id] [data-f="${e.target.dataset.g}"]`).forEach(el => {
-    el.value = e.target.value; schedulePreview(el.closest('.card'), true);
+    setVal(el, e.target.value); schedulePreview(el.closest('.card'), true);
   });
 });
 document.addEventListener('change', e => {
   const head = e.target.closest('.ghead');
   if (head && e.target.dataset.g === 'genre')
-    head.parentElement.querySelectorAll('.card[data-id] [data-f="genre"]').forEach(el => { el.value = e.target.value; });
+    head.parentElement.querySelectorAll('.card[data-id] [data-f="genre"]').forEach(el => setVal(el, e.target.value));
 });
 
 document.addEventListener('input', e => { const card = e.target.closest('.card[data-id]'); if (card && e.target.dataset.f) schedulePreview(card); });
@@ -196,7 +220,7 @@ document.addEventListener('change', async e => {
       const keepGenre = $('[data-f="genre"]', card).value;
       const fresh = document.createElement('div'); fresh.innerHTML = itemCard(item);
       const newCard = fresh.firstElementChild; card.replaceWith(newCard);
-      if (keepGenre) $('[data-f="genre"]', newCard).value = keepGenre;
+      if (keepGenre) setVal($('[data-f="genre"]', newCard), keepGenre);
       $('[data-cand]', newCard).value = e.target.value;
     } catch (x) { err.textContent = x.message; }
   }
@@ -218,8 +242,8 @@ document.addEventListener('click', async e => {
       document.querySelectorAll('[data-f="genre"]').forEach(sel => { const v = sel.value; sel.innerHTML = genreOptions(v); });
       // In the track's own card: a newly added genre is selected; a mapping fills an empty genre.
       const sel = ownCard && $('[data-f="genre"]', ownCard);
-      if (sel && act === 'add') sel.value = r.genre;
-      if (sel && act === 'map' && !sel.value) sel.value = body.target;
+      if (sel && act === 'add') setVal(sel, r.genre);
+      if (sel && act === 'map' && !sel.value) setVal(sel, body.target);
       if (ownCard) schedulePreview(ownCard);
       const box = $('#suggestions'); if (box.querySelectorAll('.sugg').length === 0) box.innerHTML = '';
     } catch (x) { alert(x.message); }

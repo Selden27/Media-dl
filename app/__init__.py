@@ -255,7 +255,7 @@ def genre_suggestion():
     lib = manager.library
     try:
         if action == "add":
-            added = lib.add_genre(data.get("label") or name.title())
+            added = lib.add_genre_manual(data.get("label") or name.title())
             return jsonify(ok=True, genre=added, genres=lib.genres)
         if action == "map":
             lib.map_genre_to(name, data.get("target"))
@@ -266,3 +266,42 @@ def genre_suggestion():
     except ValueError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True, genres=lib.genres)
+
+
+# --------------------------------------------------------------- my genres page
+@app.get("/genres")
+def genres_page():
+    return render_template("genres.html")
+
+
+@app.get("/api/genres")
+def genres_data():
+    lib = manager.library
+    return jsonify(genres=lib.genres, map=lib.data["genre_map"], artists=lib.data["artist_genres"],
+                   suggestions=lib.suggestions())
+
+
+@app.post("/api/genres")
+def genres_update():
+    d = request.get_json(silent=True) or {}
+    lib, action = manager.library, d.get("action")
+    try:
+        if action == "add":
+            result = lib.add_genre_manual(d.get("name"))
+        elif action == "rename":
+            result = lib.rename_genre(d.get("name"), d.get("new"))
+        elif action == "delete":
+            result = lib.delete_genre(d.get("name"))
+        elif action == "map":
+            result = lib.set_mapping(d.get("source"), d.get("target"))
+        elif action == "unmap":
+            result = lib.delete_mapping(d.get("source"))
+        elif action == "artist":
+            result = lib.set_artist(d.get("artist"), d.get("genre"))
+        elif action == "unartist":
+            result = lib.delete_artist(d.get("artist"))
+        else:
+            return jsonify(error="Action inconnue"), 400
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, result=result, genres=lib.genres)

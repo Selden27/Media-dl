@@ -27,7 +27,8 @@ def _seed():
             src, dst = (p.strip() for p in ln.split("=", 1))
             if src and dst:
                 mapping[src.lower()] = dst
-    return {"genres": genres, "genre_map": mapping, "artist_genres": {}, "ignored_genres": [], "genre_seen": {}}
+    return {"genres": genres, "genre_map": mapping, "artist_genres": {}, "ignored_genres": [], "genre_seen": {},
+            "removed_genres": []}
 
 
 class Library:
@@ -49,6 +50,10 @@ class Library:
         # without overriding choices already saved.
         for src, dst in seed["genre_map"].items():
             data["genre_map"].setdefault(src, dst)
+        # Genres added to the repository's genres.txt reach existing installs too, unless the user
+        # removed them from the site.
+        known = {g.lower() for g in data["genres"]} | {g.lower() for g in data["removed_genres"]}
+        data["genres"] += [g for g in seed["genres"] if g.lower() not in known]
         return data
 
     def save(self):
@@ -149,4 +154,65 @@ class Library:
         if key not in self.data["ignored_genres"]:
             self.data["ignored_genres"].append(key)
         self.data["genre_seen"].pop(key, None)
+        self.save()
+
+    # -------------------------------------------------------- list management
+    def _find(self, name):
+        key = (name or "").strip().lower()
+        return next((g for g in self.data["genres"] if g.lower() == key), None)
+
+    def rename_genre(self, old, new):
+        old, new = self._find(old), " ".join((new or "").split())
+        if not old or not new:
+            raise ValueError("genre introuvable ou nom vide")
+        if self._find(new) and self._find(new) != old:
+            raise ValueError(f"« {new} » existe déjà")
+        self.data["genres"] = [new if g == old else g for g in self.data["genres"]]
+        for table in ("genre_map", "artist_genres"):
+            self.data[table] = {k: (new if v == old else v) for k, v in self.data[table].items()}
+        self.save()
+
+    def delete_genre(self, name):
+        g = self._find(name)
+        if not g:
+            raise ValueError("genre introuvable")
+        self.data["genres"].remove(g)
+        self.data["removed_genres"] = sorted(set(self.data["removed_genres"]) | {g})
+        for table in ("genre_map", "artist_genres"):
+            self.data[table] = {k: v for k, v in self.data[table].items() if v != g}
+        self.save()
+
+    def add_genre_manual(self, name):
+        name = " ".join((name or "").split())
+        if not name:
+            raise ValueError("nom vide")
+        existing = self._find(name)
+        if existing:
+            return existing
+        self.data["genres"].append(name)
+        self.data["removed_genres"] = [g for g in self.data["removed_genres"] if g.lower() != name.lower()]
+        self.data["genre_seen"].pop(name.lower(), None)
+        self.save()
+        return name
+
+    def set_mapping(self, source, target):
+        target = self._find(target)
+        if not source or not target:
+            raise ValueError("correspondance invalide")
+        self.data["genre_map"][source.strip().lower()] = target
+        self.save()
+
+    def delete_mapping(self, source):
+        self.data["genre_map"].pop((source or "").strip().lower(), None)
+        self.save()
+
+    def set_artist(self, artist, genre):
+        genre = self._find(genre)
+        if not artist or not genre:
+            raise ValueError("artiste ou genre invalide")
+        self.data["artist_genres"][self._artist_key(artist)] = genre
+        self.save()
+
+    def delete_artist(self, artist):
+        self.data["artist_genres"].pop(self._artist_key(artist), None)
         self.save()

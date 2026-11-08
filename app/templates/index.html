@@ -36,6 +36,7 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 .empty{color:var(--muted);font-size:14px}
 .badge.sort{border-color:#d97706;color:#d97706}
 .dim{opacity:.75}
+.hlink{float:right;font-size:14px;font-weight:400;color:var(--accent);margin-top:4px}
 .sumrow{display:flex;gap:12px;align-items:flex-start}
 .sumrow .cov{width:84px;height:84px;border-radius:8px;object-fit:cover;flex:none;background:var(--line)}
 .sumrow .cov.none{display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--muted)}
@@ -55,7 +56,7 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 </head>
 <body>
 <main>
-  <h1>Media DL</h1>
+  <h1>Media DL <a class="hlink" href="genres">Mes genres</a></h1>
   <p class="sub">Colle un lien audio ou vidéo : il est téléchargé puis rangé dans ton pCloud.</p>
   <div id="review" class="note" hidden><span data-txt></span><a class="btn" href="valider">Ouvrir</a></div>
   {% if pcloud_msg %}<div class="note">{{ pcloud_msg }}</div>{% endif %}
