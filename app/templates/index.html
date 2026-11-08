@@ -44,6 +44,7 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 <main>
   <h1>Media DL</h1>
   <p class="sub">Colle un lien audio ou vidéo : il est téléchargé puis rangé dans ton pCloud.</p>
+  <div id="review" class="note" hidden><span data-txt></span><a class="btn" href="valider">Ouvrir</a></div>
   {% if pcloud_msg %}<div class="note">{{ pcloud_msg }}</div>{% endif %}
   {% if not pcloud_oauth %}
   <div class="warn">
@@ -147,6 +148,18 @@ async function refresh() {
   } catch (e) {}
 }
 refresh(); setInterval(refresh, 2000);
+async function reviewCount() {
+  try {
+    const c = await (await fetch('api/review/count')).json();
+    const box = document.getElementById('review');
+    const parts = [];
+    if (c.count) parts.push(`${c.count} morceau${c.count > 1 ? 'x' : ''} à valider`);
+    if (c.suggestions) parts.push(`${c.suggestions} genre${c.suggestions > 1 ? 's' : ''} suggéré${c.suggestions > 1 ? 's' : ''}`);
+    box.hidden = !parts.length;
+    box.querySelector('[data-txt]').textContent = parts.join(' · ');
+  } catch (e) {}
+}
+reviewCount(); setInterval(reviewCount, 10000);
 </script>
 </body>
 </html>

@@ -178,4 +178,27 @@ class PCloud:
         if data.get("result") != 0:
             raise PCloudError(f"Upload pCloud: {data.get('result')} {data.get('error')}")
         meta = data["metadata"][0]
-        return {"name": meta["name"], "size": meta.get("size"), "path": f"{folder_path.rstrip('/')}/{meta['name']}"}
+        return {"name": meta["name"], "size": meta.get("size"), "path": f"{folder_path.rstrip('/')}/{meta['name']}",
+                "fileid": meta.get("fileid")}
+
+    # ------------------------------------------------------- existing files
+    def download(self, fileid, dest):
+        """Download a stored file to `dest` (streamed)."""
+        data = self.call("getfilelink", fileid=fileid)
+        url = f"https://{data['hosts'][0]}{data['path']}"
+        with requests.get(url, stream=True, timeout=(30, 600)) as r:
+            r.raise_for_status()
+            with open(dest, "wb") as fh:
+                for chunk in r.iter_content(1 << 20):
+                    fh.write(chunk)
+        return dest
+
+    def delete(self, fileid):
+        return self.call("deletefile", fileid=fileid)
+
+    def exists(self, fileid):
+        try:
+            self.call("stat", fileid=fileid)
+            return True
+        except PCloudError:
+            return False

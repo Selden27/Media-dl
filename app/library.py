@@ -27,7 +27,7 @@ def _seed():
             src, dst = (p.strip() for p in ln.split("=", 1))
             if src and dst:
                 mapping[src.lower()] = dst
-    return {"genres": genres, "genre_map": mapping, "artist_genres": {}, "ignored_genres": []}
+    return {"genres": genres, "genre_map": mapping, "artist_genres": {}, "ignored_genres": [], "genre_seen": {}}
 
 
 class Library:
@@ -93,3 +93,60 @@ class Library:
         if key and genre in self.data["genres"]:
             self.data["artist_genres"][key] = genre
             self.save()
+
+    # ------------------------------------------------------ genre suggestions
+    def _known(self, name):
+        key = name.strip().lower()
+        return (any(g.lower() == key for g in self.data["genres"]) or key in self.data["genre_map"]
+                or key in self.data["ignored_genres"])
+
+    def record_unmapped(self, names, artist, consensus=()):
+        """Count genres found for a track that are not in the list (for suggestions)."""
+        changed = False
+        for name in names:
+            key = name.strip().lower()
+            if not key or self._known(key):
+                continue
+            seen = self.data["genre_seen"].setdefault(key, {"count": 0, "artists": [], "consensus": False})
+            seen["count"] += 1
+            a = self._artist_key(artist)
+            if a and a not in seen["artists"]:
+                seen["artists"] = (seen["artists"] + [a])[-10:]
+            if key in consensus:
+                seen["consensus"] = True
+            changed = True
+        if changed:
+            self.save()
+
+    def suggestions(self):
+        """Genres worth adding: several sources agreed on one track, or seen on 3+ tracks of 2+ artists."""
+        out = []
+        for key, seen in self.data["genre_seen"].items():
+            if self._known(key):
+                continue
+            if seen.get("consensus") or (seen["count"] >= 3 and len(seen["artists"]) >= 2):
+                out.append({"name": key, "count": seen["count"], "artists": len(seen["artists"]),
+                            "consensus": bool(seen.get("consensus"))})
+        return sorted(out, key=lambda x: (-x["count"], x["name"]))
+
+    def add_genre(self, name):
+        name = " ".join(name.split())
+        if name and not any(g.lower() == name.lower() for g in self.data["genres"]):
+            self.data["genres"].append(name)
+        self.data["genre_seen"].pop(name.lower(), None)
+        self.save()
+        return name
+
+    def map_genre_to(self, name, target):
+        if target not in self.data["genres"]:
+            raise ValueError("genre inconnu")
+        self.data["genre_map"][name.strip().lower()] = target
+        self.data["genre_seen"].pop(name.strip().lower(), None)
+        self.save()
+
+    def ignore_genre(self, name):
+        key = name.strip().lower()
+        if key not in self.data["ignored_genres"]:
+            self.data["ignored_genres"].append(key)
+        self.data["genre_seen"].pop(key, None)
+        self.save()

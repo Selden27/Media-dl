@@ -14,6 +14,7 @@ from yt_dlp.networking.impersonate import ImpersonateTarget # Ajout ***Olivier**
 
 from . import musicmeta, sources, tagging
 from .library import Library
+from .review import EDITABLE, ReviewStore
 from .pcloud import PCloud
 
 AUDIO_FORMAT = os.getenv("AUDIO_FORMAT", "mp3")          # mp3, m4a, opus, flac...
@@ -44,6 +45,7 @@ class JobManager:
         self.pool = ThreadPoolExecutor(max_workers=int(os.getenv("MAX_CONCURRENT", "2")))
         self.pcloud = PCloud.from_env()
         self.library = Library()
+        self.review = ReviewStore()
         threading.Thread(target=self._self_test, daemon=True).start()
 
     @staticmethod
@@ -204,9 +206,11 @@ class JobManager:
         uploaded = []
         for i, ((path, entry, thumb), t) in enumerate(zip(items, tag_list), 1):
             label = f"({i}/{n}) " if n > 1 else ""
-            if not t.get("cover") and thumb:
-                t["cover"], t["cover_source"] = musicmeta.thumbnail_cover(thumb), "miniature"
+            thumb_cover = musicmeta.thumbnail_cover(thumb) if thumb else None
+            if not t.get("cover") and thumb_cover:
+                t["cover"], t["cover_source"] = thumb_cover, "miniature"
             auto_ok = t["confidence"] >= AUTO_CONFIDENCE
+            self.library.record_unmapped(t.get("unmapped_genres") or [], t.get("artist"), t.get("genre_consensus") or [])
             tagging.write_tags(path, t)
             folder, name = tagging.target_path(t, job["folder"], auto_ok)
             final = os.path.join(os.path.dirname(path), f"up-{i}", name)
@@ -216,6 +220,11 @@ class JobManager:
             res = self.pcloud.upload(final, folder, on_progress=lambda p: self._update(job_id, progress=round(p, 1)))
             res.update(confidence=round(t["confidence"], 2), genre=t.get("genre"), to_sort=not auto_ok,
                        album=t.get("album"), cover=t.get("cover_source"))
+            if not auto_ok:
+                try:
+                    self.review.add(t, res, thumb_cover)
+                except Exception as e:
+                    sources.log.warning("review: %s", e)
             uploaded.append(res)
             os.remove(final)
             self._update(job_id, files=list(uploaded))
@@ -279,3 +288,88 @@ class JobManager:
             self._update(job_id, status="error", error=msg, finished=time.time(), message="Erreur")
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+    # ------------------------------------------------------------ validation
+    @staticmethod
+    def _clean_edits(edits):
+        out = {}
+        for key in EDITABLE:
+            if key not in edits:
+                continue
+            value = edits[key]
+            value = str(value).strip() if value is not None else ""
+            if key in ("track", "total_tracks", "disc", "total_discs"):
+                out[key] = int(value) if value.isdigit() and int(value) > 0 else None
+            else:
+                out[key] = value or None
+        return out
+
+    def review_preview(self, item_id, edits):
+        item = self.review.get(item_id)
+        if not item:
+            raise KeyError(item_id)
+        tags = dict(item["tags"], **self._clean_edits(edits))
+        folder, name = tagging.target_path(tags, self._root_of(item), True)
+        return f"{folder}/{name}"
+
+    @staticmethod
+    def _root_of(item):
+        path = item.get("path") or ""
+        marker = f"/{tagging.TO_SORT_FOLDER}/"
+        return path.split(marker)[0] if marker in path else AUDIO_FOLDER
+
+    def review_candidate(self, item_id, index):
+        item = self.review.get(item_id)
+        if not item:
+            raise KeyError(item_id)
+        try:
+            cand = item["candidates"][int(index)]
+        except (IndexError, ValueError, TypeError):
+            raise RuntimeError("Ce résultat n'existe plus.")
+        details = musicmeta.candidate_details(cand, item.get("hints") or {})
+        if not details:
+            raise RuntimeError("Impossible de charger ce candidat.")
+        cover = details.pop("cover", None)
+        cover_source = details.pop("cover_source", None)
+        tags = dict(item["tags"])
+        for k in ("release_id", "release_group_id", "recording_id", "discogs_release_id", "track_id", "isrc",
+                  "date", "original_date", "release_type", "compilation", "total_discs", "disc"):
+            tags.pop(k, None)
+        tags.update({k: v for k, v in details.items() if v is not None})
+        tags["source"] = cand.get("source")
+        covers = item["covers"]
+        if cover:
+            name = f"candidat-{index}"
+            self.review.save_cover(item_id, name, cover)
+            if not any(c["name"] == name for c in covers):
+                covers.append({"name": name, "label": f"{cover_source} ({cand.get('album') or 'candidat'})"})
+            item["cover"] = name
+        self.review.update(item_id, tags=tags, covers=covers, cover=item["cover"])
+        return self.review.get(item_id)
+
+    def review_validate(self, item_id, edits, cover_name=None, remember=True):
+        """Retag the file stored in "_A trier" and move it to its final place in pCloud."""
+        item = self.review.get(item_id)
+        if not item:
+            raise KeyError(item_id)
+        tags = dict(item["tags"], **self._clean_edits(edits))
+        if not item.get("fileid") or not self.pcloud.exists(item["fileid"]):
+            raise RuntimeError("Le fichier n'est plus dans pCloud (déplacé ou supprimé ?). Retire-le de la liste.")
+        cover = self.review.read_cover(item_id, cover_name) if cover_name else None
+        workdir = tempfile.mkdtemp(prefix=f"rv-{item_id}-", dir=WORK_DIR)
+        try:
+            folder, name = tagging.target_path(tags, self._root_of(item), True)
+            local = os.path.join(workdir, name)
+            self.pcloud.download(item["fileid"], local)
+            tagging.write_tags(local, dict(tags, cover=cover))
+            res = self.pcloud.upload(local, folder)
+            self.pcloud.delete(item["fileid"])
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        if remember and tags.get("genre"):
+            self.library.remember_artist_genre(tags.get("albumartist") or tags.get("artist"), tags["genre"])
+            if tags.get("artist") and tags.get("artist") != tags.get("albumartist"):
+                self.library.remember_artist_genre(tags["artist"], tags["genre"])
+        self.review.remove(item_id)
+        return res["path"]

@@ -42,11 +42,11 @@ Fichiers : `app/data/genres.txt` (liste) et `app/data/genre_map.txt` (correspond
 - Chemin selon le modèle ; noms de fichiers nettoyés.
 - Stockage persistant : `/data/library.json`.
 
-### Étape 2 : validation et suggestions de genres
+### Étape 2 : validation et suggestions de genres ✅ (livrée)
 - Écran « À valider » : tags modifiables, choix de l'édition de l'album, pochettes au choix, genre (liste déroulante, choix unique), aperçu du chemin.
 - Validation : déplacement du fichier de `_A trier` vers son chemin final, et mémoire par artiste mise à jour.
 - Suggestion d'un nouveau genre quand ≥ 2 sources s'accordent sur un même morceau, ou quand il revient sur 3 morceaux d'au moins 2 artistes. Trois choix : **Ajouter** / **Associer à un genre existant** / **Ignorer**. Section « Genres suggérés » pour les suggestions en attente.
-- Proposer la mise à jour des morceaux déjà enregistrés quand un genre est ajouté plus tard.
+- Proposer la mise à jour des morceaux déjà enregistrés quand un genre est ajouté plus tard → reporté à l'étape 4 (nécessite de parcourir la bibliothèque).
 
 ### Étape 3 : genres et cas difficiles ✅ (livrée)
 - **Discogs** (genres et styles) et **Last.fm** (tags) pour mieux suggérer le genre.

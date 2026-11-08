@@ -201,9 +201,9 @@ def _genre_votes(entity_type, mbid, weight, votes):
         return
     data = _mb_get(f"{entity_type}/{mbid}", inc="genres+tags") or {}
     for g in data.get("genres") or []:
-        votes.append((g["name"], weight * (1 + g.get("count", 0)) * 1.0))
+        votes.append((g["name"], weight * (1 + g.get("count", 0)) * 1.0, "MusicBrainz"))
     for t in data.get("tags") or []:
-        votes.append((t["name"], weight * (1 + t.get("count", 0)) * 0.5))
+        votes.append((t["name"], weight * (1 + t.get("count", 0)) * 0.5, "MusicBrainz"))
 
 
 def release_details(release_id, recording_id):
@@ -252,7 +252,7 @@ def choose_genre(library, votes, artist, title, description):
     if remembered:
         return remembered, []
     scores, unmapped = {}, {}
-    for name, w in votes:
+    for name, w, *_ in votes:
         g = library.map_genre(name)
         if g:
             scores[g] = scores.get(g, 0) + w
@@ -392,7 +392,8 @@ def _discogs_identify(h):
         }
         if info["compilation"]:
             info["albumartist"] = "Various Artists"
-        votes = [(g, 2.0) for g in rel.get("genres") or []] + [(st, 3.0) for st in rel.get("styles") or []]
+        votes = ([(g, 2.0, "Discogs") for g in rel.get("genres") or []]
+                 + [(st, 3.0, "Discogs") for st in rel.get("styles") or []])
         best = (conf, info, votes, rel)
     return best
 
@@ -410,7 +411,7 @@ def identify(info, library, path=None, auto_confidence=0.85):
         "year": str(h["year"]) if h["year"] else None, "url": h["url"], "confidence": 0.0, "source": "site",
         "genre": None, "unmapped_genres": [],
     }
-    votes = [(g, 3.0) for g in h["genres"]]  # genre given by the site (SoundCloud, Bandcamp)
+    votes = [(g, 3.0, "site") for g in h["genres"]]  # genre given by the site (SoundCloud, Bandcamp)
 
     candidates = search_recording(h)
     best = candidates[0] if candidates and candidates[0][0] >= 0.6 else None
@@ -443,6 +444,10 @@ def identify(info, library, path=None, auto_confidence=0.85):
         except Exception as e:
             sources.log.warning("discogs: %s", e)
             dg = None
+        if dg:
+            tags["_discogs_candidate"] = {"source": "Discogs", "confidence": dg[0], "title": dg[1]["title"],
+                                          "artist": dg[1]["artist"], "album": dg[1]["album"],
+                                          "discogs_release_id": dg[1]["discogs_release_id"]}
         if dg and dg[0] > tags["confidence"]:
             conf, dinfo, dvotes, discogs_rel = dg
             tags.update({k: v for k, v in dinfo.items() if v not in (None, "")})
@@ -451,11 +456,17 @@ def identify(info, library, path=None, auto_confidence=0.85):
     elif sources.DISCOGS_TOKEN and tags.get("album"):
         # Already identified: Discogs is only asked for its genres / styles (one search).
         results = sources.discogs_search(tags.get("albumartist") or tags["artist"], album=tags["album"])
-        votes += sources.discogs_genre_votes([r for r in results if _sim(tags["album"], r.get("title", "").split(" - ", 1)[-1]) > 0.7])
+        votes += [v + ("Discogs",) for v in sources.discogs_genre_votes(
+            [r for r in results if _sim(tags["album"], r.get("title", "").split(" - ", 1)[-1]) > 0.7])]
         tags["_discogs_results"] = results
-    votes += sources.lastfm_genre_votes(tags["artist"], tags["title"])
+    votes += [v + ("Last.fm",) for v in sources.lastfm_genre_votes(tags["artist"], tags["title"])]
 
     tags["genre"], tags["unmapped_genres"] = choose_genre(library, votes, tags["artist"], tags["title"], h["description"])
+    by_source = {}
+    for name, _w, *src in votes:
+        by_source.setdefault(name.lower(), set()).add(src[0] if src else "?")
+    tags["genre_consensus"] = [n for n in tags["unmapped_genres"] if len(by_source.get(n, ())) >= 2]
+    tags["genre_votes"] = sorted({library.map_genre(n) for n, *_ in votes if library.map_genre(n)})
     if not tags.get("albumartist"):
         tags["albumartist"] = tags["artist"]
     if tags.get("compilation"):
@@ -475,10 +486,13 @@ def identify(info, library, path=None, auto_confidence=0.85):
     tags.pop("_discogs_results", None)
     tags["cover"], tags["cover_source"] = cover, cover_src
     tags["candidates"] = [
-        {"confidence": c, "title": r.get("title"), "artist": _credit(r.get("artist-credit")),
+        {"source": "MusicBrainz", "confidence": c, "title": r.get("title"), "artist": _credit(r.get("artist-credit")),
          "album": (rl or {}).get("title"), "recording_id": r.get("id"), "release_id": (rl or {}).get("id")}
         for c, r, rl in candidates[:5]
     ]
+    if tags.get("_discogs_candidate"):
+        tags["candidates"].append(tags.pop("_discogs_candidate"))
+    tags["hints"] = {k: h[k] for k in ("title", "artist", "album", "duration", "url")}
     sources.log.warning("tags: %s | %s - %s | album=%s | genre=%s | confiance=%.2f",
                         tags["source"], tags["artist"], tags["title"], tags.get("album"), tags["genre"], tags["confidence"])
     return tags
@@ -508,3 +522,34 @@ def align_to_release(tag_list, auto_confidence):
                  albumartist="Various Artists" if t.get("compilation") else t.get("albumartist"))
         if t.get("date"):
             t["year"] = t["date"][:4]
+
+
+def candidate_details(cand, hints):
+    """Full tags + cover for one candidate picked on the validation screen."""
+    if cand.get("source") == "Discogs":
+        rel = sources.discogs_release(cand.get("discogs_release_id"))
+        if not rel:
+            return None
+        h = dict(hints, title=cand.get("title") or hints.get("title"), artist=cand.get("artist") or hints.get("artist"))
+        tracklist = rel.get("tracklist") or []
+        entry = max((tr for tr in tracklist if tr.get("type_", "track") == "track"),
+                    key=lambda tr: _sim(h["title"], tr.get("title")), default={})
+        track, disc = _track_number(entry.get("position"), tracklist, entry)
+        rel_artists = ", ".join(sources._discogs_artist(x.get("name")) for x in rel.get("artists") or [])
+        labels = [lb.get("name") for lb in rel.get("labels") or [] if lb.get("name")]
+        raw = sources.discogs_image(rel)
+        return {"title": entry.get("title") or h["title"], "artist": cand.get("artist") or rel_artists,
+                "album": rel.get("title"), "albumartist": rel_artists, "track": track, "disc": disc,
+                "total_tracks": len([tr for tr in tracklist if tr.get("type_", "track") == "track"]),
+                "year": str(rel["year"]) if rel.get("year") else None, "label": labels[0] if labels else None,
+                "discogs_release_id": rel.get("id"), "cover": _to_jpeg(raw) if raw else None, "cover_source": "Discogs"}
+    rec_id, rel_id = cand.get("recording_id"), cand.get("release_id")
+    t = {"title": cand.get("title"), "artist": cand.get("artist"), "recording_id": rec_id}
+    if rel_id:
+        t.update({k: v for k, v in release_details(rel_id, rec_id).items() if v is not None})
+        if t.get("date"):
+            t["year"] = t["date"][:4]
+        if t.get("compilation"):
+            t["albumartist"] = "Various Artists"
+        t["cover"], t["cover_source"] = fetch_cover(rel_id, t.get("release_group_id"))
+    return t

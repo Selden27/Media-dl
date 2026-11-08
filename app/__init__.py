@@ -4,7 +4,7 @@ import secrets
 from urllib.parse import urlencode
 
 import jwt
-from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 
 from .jobs import AUDIO_FOLDER, VIDEO_FOLDER, JobManager
 
@@ -147,3 +147,99 @@ def job(job_id):
 def clear():
     manager.clear_finished()
     return jsonify(ok=True)
+
+
+# ------------------------------------------------------------------ validation
+def _item_view(item):
+    item = dict(item)
+    item["preview"] = manager.review_preview(item["id"], {})
+    # Suggestions saved with the item: drop genres added, mapped or ignored since then.
+    tags = item["tags"] = dict(item["tags"])
+    tags["genre_consensus"] = [g for g in tags.get("genre_consensus") or [] if not manager.library._known(g)]
+    return item
+
+
+@app.get("/valider")
+def review_page():
+    return render_template("review.html")
+
+
+@app.get("/api/review")
+def review_list():
+    lib = manager.library
+    return jsonify(items=[_item_view(i) for i in manager.review.list()], genres=lib.genres,
+                   suggestions=lib.suggestions())
+
+
+@app.get("/api/review/count")
+def review_count():
+    return jsonify(count=manager.review.count(), suggestions=len(manager.library.suggestions()))
+
+
+@app.get("/api/review/<item_id>/cover/<name>")
+def review_cover(item_id, name):
+    data = manager.review.read_cover(item_id, name)
+    if not data:
+        abort(404)
+    return Response(data, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/review/<item_id>/preview")
+def review_preview(item_id):
+    try:
+        return jsonify(path=manager.review_preview(item_id, request.get_json(silent=True) or {}))
+    except KeyError:
+        return jsonify(error="Introuvable"), 404
+
+
+@app.post("/api/review/<item_id>/candidate")
+def review_candidate(item_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(_item_view(manager.review_candidate(item_id, data.get("index", 0))))
+    except KeyError:
+        return jsonify(error="Introuvable"), 404
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.post("/api/review/<item_id>/validate")
+def review_validate(item_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        path = manager.review_validate(item_id, data.get("tags") or {}, data.get("cover"),
+                                       bool(data.get("remember", True)))
+        return jsonify(ok=True, path=path)
+    except KeyError:
+        return jsonify(error="Introuvable"), 404
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+
+
+@app.post("/api/review/<item_id>/dismiss")
+def review_dismiss(item_id):
+    manager.review.remove(item_id)
+    return jsonify(ok=True)
+
+
+# ------------------------------------------------------------- genre suggestions
+@app.post("/api/genres/suggestion")
+def genre_suggestion():
+    data = request.get_json(silent=True) or {}
+    name, action = (data.get("name") or "").strip(), data.get("action")
+    if not name:
+        return jsonify(error="Nom manquant"), 400
+    lib = manager.library
+    try:
+        if action == "add":
+            added = lib.add_genre(data.get("label") or name.title())
+            return jsonify(ok=True, genre=added, genres=lib.genres)
+        if action == "map":
+            lib.map_genre_to(name, data.get("target"))
+        elif action == "ignore":
+            lib.ignore_genre(name)
+        else:
+            return jsonify(error="Action inconnue"), 400
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, genres=lib.genres)
