@@ -151,8 +151,11 @@ class PCloud:
         return folder_id
 
     # ---------------------------------------------------------------- upload
-    def upload(self, local_path, folder_path, on_progress=None):
-        """Stream a file to pCloud without loading it in memory."""
+    def upload(self, local_path, folder_path, on_progress=None, overwrite=False):
+        """Stream a file to pCloud without loading it in memory.
+
+        overwrite=True replaces a file of the same name (pCloud keeps the old one as a revision);
+        otherwise a clash is renamed ("name (1).mp3")."""
         folder_id = self.ensure_folder(folder_path)
         self._login()
         auth_params, headers = self._auth_kwargs()
@@ -166,7 +169,9 @@ class PCloud:
                     on_progress(monitor.bytes_read / total * 100)
 
             monitor = MultipartEncoderMonitor(encoder, cb)
-            params = {"folderid": folder_id, "nopartial": 1, "renameifexists": 1, **auth_params}
+            params = {"folderid": folder_id, "nopartial": 1, **auth_params}
+            if not overwrite:
+                params["renameifexists"] = 1
             r = requests.post(
                 f"https://{self.host}/uploadfile",
                 params=params,

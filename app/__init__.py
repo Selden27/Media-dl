@@ -134,13 +134,36 @@ def download():
 
 @app.get("/api/jobs")
 def jobs():
-    return jsonify(manager.list())
+    out = []
+    for j in manager.list():  # the per-file tag details are only needed server-side
+        j = dict(j, files=[{k: v for k, v in f.items() if k != "tags"} for f in j.get("files") or []])
+        out.append(j)
+    return jsonify(out)
 
 
 @app.get("/api/jobs/<job_id>")
 def job(job_id):
     j = manager.get(job_id)
     return (jsonify(j), 200) if j else (jsonify(error="Introuvable"), 404)
+
+
+@app.get("/api/jobs/<job_id>/cover/<key>")
+def job_cover(job_id, key):
+    data = manager.job_cover(job_id, key)
+    if not data:
+        abort(404)
+    return Response(data, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/api/jobs/<job_id>/edit")
+def job_edit(job_id):
+    try:
+        created = manager.edit_job(job_id)
+    except KeyError:
+        return jsonify(error="Téléchargement introuvable ou pas terminé"), 404
+    except Exception as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, created=created)
 
 
 @app.post("/api/jobs/clear")

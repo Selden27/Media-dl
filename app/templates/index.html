@@ -36,6 +36,19 @@ h2{font-size:16px;margin:28px 0 10px;display:flex;justify-content:space-between;
 .empty{color:var(--muted);font-size:14px}
 .badge.sort{border-color:#d97706;color:#d97706}
 .dim{opacity:.75}
+.sumrow{display:flex;gap:12px;align-items:flex-start}
+.sumrow .cov{width:84px;height:84px;border-radius:8px;object-fit:cover;flex:none;background:var(--line)}
+.sumrow .cov.none{display:flex;align-items:center;justify-content:center;font-size:28px;color:var(--muted)}
+.sumrow .info{min-width:0;flex:1}
+.warnc{color:#d97706;font-weight:600}
+.anoms{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+.anom{font-size:12px;color:#b45309;background:rgba(217,119,6,.12);border-radius:4px;padding:1px 6px}
+.sumact{justify-content:space-between;margin-top:8px}
+.sumact details{flex:1;font-size:14px}
+.sumact summary{cursor:pointer;color:var(--muted)}
+.sumact ol{margin:6px 0 0;padding-left:0;list-style:none;font-size:13px}
+.sumact li{padding:2px 0;border-bottom:1px solid var(--line)}
+.sumact .btn{margin-left:0}
 .note{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:14px}
 .btn{display:inline-block;margin-left:8px;padding:6px 12px;border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;font-weight:600}
 </style>
@@ -135,16 +148,60 @@ function fileLine(f) {
   const sort = f.to_sort ? '<span class="badge sort">à trier</span>' : '';
   return esc(f.path) + sort + (extra.length ? ` <span class="dim">· ${extra.join(' · ')}</span>` : '');
 }
-async function refresh() {
-  try {
-    const jobs = await (await fetch('api/jobs')).json();
-    $('#jobs').innerHTML = jobs.length ? jobs.map(j => `
+const fmtDur = d => d ? `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}` : '';
+function summaryCard(j) {
+  const s = j.summary, open = openTracks.has(j.id) ? 'open' : '';
+  const cover = s.cover_key ? `<img class="cov" src="api/jobs/${j.id}/cover/${s.cover_key}" alt="">` : '<div class="cov none">♪</div>';
+  const head = s.kind === 'album'
+    ? `<div class="t">${esc(s.album || j.title)}</div><div class="m">${esc(s.albumartist || '')}${s.year ? ' · ' + esc(s.year) : ''} · ${s.tracks} pistes</div>`
+    : `<div class="t">${esc(s.title || j.title)}</div><div class="m">${esc(s.artist || '')} · ${s.album ? esc(s.album) : 'Single'}${s.year ? ' · ' + esc(s.year) : ''}</div>`;
+  const genre = s.genres.length ? `Genre : <b>${esc(s.genres.join(', '))}</b>` : '<span class="warnc">⚠ aucun genre</span>';
+  const anomalies = s.anomalies.filter(a => a !== 'aucun genre').map(a => `<span class="anom">⚠ ${esc(a)}</span>`).join(' ');
+  const tracks = j.files.map(f => `<li>${f.track ? String(f.track).padStart(2, '0') + ' - ' : ''}${esc(f.title || f.name)}
+      <span class="dim">${fmtDur(f.duration)}${f.genre ? ' · ' + esc(f.genre) : ''}</span>${f.to_sort ? '<span class="badge sort">à trier</span>' : ''}${f.review_id ? '<span class="badge">à valider</span>' : ''}</li>`).join('');
+  return `<div class="job done sum" data-job="${j.id}">
+    <div class="sumrow">${cover}<div class="info">${head}
+      <div class="m">${genre} · ${esc(s.sources.join(' + ') || '?')} · confiance ${Math.round(s.confidence * 100)} %</div>
+      <div class="m">📁 ${esc(s.folder)}</div>
+      ${anomalies ? `<div class="anoms">${anomalies}</div>` : ''}</div></div>
+    <div class="row sumact"><details data-tracks ${open}><summary>Voir les pistes</summary><ol>${tracks}</ol></details>
+      ${s.in_review ? `<a class="btn" href="valider">À valider (${s.in_review})</a>` : `<button class="ghost" data-edit>Modifier</button>`}</div>
+  </div>`;
+}
+function jobCard(j) {
+  if (j.status === 'done' && j.summary) return summaryCard(j);
+  return `
       <div class="job ${j.status}">
         <div class="t">${esc(j.title || j.url)}<span class="badge">${j.mode === 'video' ? 'vidéo' : 'audio'}</span><span class="badge">${label[j.status] || j.status}</span></div>
         <div class="m">${esc(j.error || j.message)}</div>
         ${j.files.length ? `<div class="m">${j.files.map(fileLine).join('<br>')}</div>` : ''}
         <div class="bar"><i style="width:${j.status === 'done' ? 100 : j.progress}%"></i></div>
-      </div>`).join('') : '<p class="empty">Aucun téléchargement pour l\'instant.</p>';
+      </div>`;
+}
+const openTracks = new Set();
+let lastJobs = '';
+document.addEventListener('toggle', e => {
+  const card = e.target.closest && e.target.closest('[data-job]');
+  if (card && e.target.matches('[data-tracks]')) e.target.open ? openTracks.add(card.dataset.job) : openTracks.delete(card.dataset.job);
+}, true);
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('[data-edit]');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`api/jobs/${btn.closest('[data-job]').dataset.job}/edit`, {method: 'POST'});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    location.href = 'valider';
+  } catch (err) { alert('Erreur : ' + err.message); btn.disabled = false; }
+});
+async function refresh() {
+  try {
+    const text = await (await fetch('api/jobs')).text();
+    if (text === lastJobs) return;  // nothing changed: keep the page as it is
+    lastJobs = text;
+    const jobs = JSON.parse(text);
+    $('#jobs').innerHTML = jobs.length ? jobs.map(jobCard).join('') : '<p class="empty">Aucun téléchargement pour l\'instant.</p>';
   } catch (e) {}
 }
 refresh(); setInterval(refresh, 2000);

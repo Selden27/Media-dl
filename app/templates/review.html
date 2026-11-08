@@ -40,6 +40,12 @@ button:disabled{opacity:.6}
 .err{color:var(--err);font-size:13px;margin-top:6px}
 .ok{color:var(--ok)}
 .empty{color:var(--muted)}
+.group{border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:18px;background:rgba(127,127,127,.04)}
+.group .card{margin-bottom:10px}
+.ghead{padding:6px 6px 14px}
+.gtop{display:flex;gap:12px;align-items:center}
+.gtop img,.gtop .nocov{width:64px;height:64px;border-radius:8px;object-fit:cover;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);flex:none}
+.badge.reason{border-color:var(--warn);color:var(--warn)}
 </style>
 </head>
 <body>
@@ -94,7 +100,7 @@ function itemCard(it) {
   const consensus = (t.genre_consensus || []);
   return `<div class="card" data-id="${it.id}">
     <div class="head"><div class="title">${esc(it.hints.title || t.title)}</div>
-      <span class="badge">confiance ${conf} % · ${esc(t.source || '?')}</span></div>
+      <span><span class="badge reason">${esc(it.reason || 'à trier')}</span> <span class="badge">confiance ${conf} % · ${esc(t.source || '?')}</span></span></div>
     <div class="m">Actuellement : ${esc(it.path)}${it.hints.url ? ` · <a href="${esc(it.hints.url)}" target="_blank" rel="noopener">source</a>` : ''}</div>
     ${cands ? `<label>Autre résultat trouvé</label><div class="row" style="margin-top:0"><select data-cand style="flex:1"><option value="">— garder les tags actuels —</option>${cands}</select></div>` : ''}
     <div class="grid">${FIELDS.map(([k, l]) => `<div><label>${l}</label><input data-f="${k}" value="${esc(t[k] ?? '')}"></div>`).join('')}
@@ -105,7 +111,7 @@ function itemCard(it) {
     <div class="row">
       <label class="check"><input type="checkbox" data-remember checked> Retenir le genre pour cet artiste</label>
     </div>
-    <div class="row"><button data-validate>Valider et ranger</button>
+    <div class="row"><button data-validate>${it.reason === 'à trier' || !it.reason ? 'Valider et ranger' : 'Valider'}</button>
       <button class="ghost" data-dismiss title="Le fichier reste dans _A trier">Retirer de la liste</button></div>
     <div class="err" data-err></div>
   </div>`;
@@ -117,20 +123,67 @@ function readTags(card) {
   return tags;
 }
 
-let previewTimer;
+const previewTimers = new Map();
 function schedulePreview(card) {
-  clearTimeout(previewTimer);
-  previewTimer = setTimeout(async () => {
+  clearTimeout(previewTimers.get(card));
+  previewTimers.set(card, setTimeout(async () => {
     try { $('[data-preview]', card).textContent = (await api(`api/review/${card.dataset.id}/preview`, readTags(card))).path; } catch (e) {}
-  }, 300);
+  }, 400));
+}
+
+async function validateCard(card) {
+  const err = $('[data-err]', card), btn = $('[data-validate]', card);
+  if (btn) btn.disabled = true;
+  err.textContent = 'Mise à jour du fichier…';
+  try {
+    const sel = $('.cov.sel', card);
+    const r = await api(`api/review/${card.dataset.id}/validate`, {tags: readTags(card), cover: sel ? sel.dataset.cover : '',
+                        remember: $('[data-remember]', card).checked});
+    card.innerHTML = `<div class="ok">✓ ${esc(r.path)}</div>`;
+    card.removeAttribute('data-id');
+    setTimeout(() => { const g = card.closest('.group'); card.remove(); if (g && !g.querySelector('.card')) g.remove(); }, 4000);
+    return true;
+  } catch (x) { err.textContent = x.message; if (btn) btn.disabled = false; return false; }
+}
+
+const GROUP_FIELDS = [['albumartist', "Artiste de l'album"], ['album', 'Album'], ['year', 'Année']];
+function groupHeader(key, items) {
+  const t = items[0].tags, cover = items[0].cover;
+  const img = cover ? `<img src="api/review/${items[0].id}/cover/${esc(cover)}" alt="">` : '<div class="nocov">♪</div>';
+  return `<div class="ghead" data-group="${esc(key)}">
+    <div class="gtop">${img}<div><div class="title">${esc(t.album || 'Sans album')}</div>
+      <div class="m">${esc(t.albumartist || t.artist || '')} · ${items.length} pistes à valider</div></div></div>
+    <div class="grid">${GROUP_FIELDS.map(([k, l]) => `<div><label>${l} (toutes les pistes)</label><input data-g="${k}" value="${esc(t[k] ?? '')}"></div>`).join('')}
+      <div><label>Genre (toutes les pistes)</label><select data-g="genre">${genreOptions(items.every(i => i.tags.genre === t.genre) ? t.genre : '')}</select></div></div>
+    <div class="row"><button data-validate-group>Valider tout l'album</button><span class="m" data-gstatus></span></div>
+  </div>`;
 }
 
 async function load() {
   const data = await api('api/review');
   genres = data.genres;
   renderSuggestions(data.suggestions);
-  $('#items').innerHTML = data.items.length ? data.items.map(itemCard).join('') : '<p class="empty">Rien à valider pour l’instant. 🎉</p>';
+  if (!data.items.length) { $('#items').innerHTML = '<p class="empty">Rien à valider pour l’instant. 🎉</p>'; return; }
+  const groups = new Map();
+  data.items.forEach(it => { const k = it.group || it.id; groups.has(k) ? groups.get(k).push(it) : groups.set(k, [it]); });
+  $('#items').innerHTML = [...groups].map(([k, items]) => items.length > 1
+    ? `<section class="group" data-group="${esc(k)}">${groupHeader(k, items)}${items.map(itemCard).join('')}</section>`
+    : itemCard(items[0])).join('');
 }
+
+// Album-level fields fill every track of the group.
+document.addEventListener('input', e => {
+  const head = e.target.closest('.ghead');
+  if (!head || !e.target.dataset.g) return;
+  head.parentElement.querySelectorAll(`.card[data-id] [data-f="${e.target.dataset.g}"]`).forEach(el => {
+    el.value = e.target.value; schedulePreview(el.closest('.card'), true);
+  });
+});
+document.addEventListener('change', e => {
+  const head = e.target.closest('.ghead');
+  if (head && e.target.dataset.g === 'genre')
+    head.parentElement.querySelectorAll('.card[data-id] [data-f="genre"]').forEach(el => { el.value = e.target.value; });
+});
 
 document.addEventListener('input', e => { const card = e.target.closest('.card[data-id]'); if (card && e.target.dataset.f) schedulePreview(card); });
 document.addEventListener('change', async e => {
@@ -172,19 +225,23 @@ document.addEventListener('click', async e => {
     } catch (x) { alert(x.message); }
     return;
   }
+  if (e.target.matches('[data-validate-group]')) {
+    const group = e.target.closest('.group'), status = $('[data-gstatus]', group);
+    e.target.disabled = true;
+    const cards = [...group.querySelectorAll('.card[data-id]')];
+    let ok = 0;
+    for (const [i, c] of cards.entries()) {
+      status.textContent = `Piste ${i + 1}/${cards.length}…`;
+      if (await validateCard(c)) ok++;
+    }
+    status.textContent = ok === cards.length ? `✓ ${ok} pistes validées` : `${ok}/${cards.length} validées — voir les erreurs ci-dessous`;
+    e.target.disabled = ok === cards.length;
+    return;
+  }
   const card = e.target.closest('.card[data-id]');
   if (!card) return;
   const err = $('[data-err]', card);
-  if (e.target.matches('[data-validate]')) {
-    e.target.disabled = true; err.textContent = 'Mise à jour du fichier et rangement…';
-    try {
-      const sel = $('.cov.sel', card);
-      const r = await api(`api/review/${card.dataset.id}/validate`, {tags: readTags(card), cover: sel ? sel.dataset.cover : '',
-                          remember: $('[data-remember]', card).checked});
-      card.innerHTML = `<div class="ok">✓ Rangé dans ${esc(r.path)}</div>`;
-      setTimeout(() => card.remove(), 4000);
-    } catch (x) { err.textContent = x.message; e.target.disabled = false; }
-  }
+  if (e.target.matches('[data-validate]')) { validateCard(card); return; }
   if (e.target.matches('[data-dismiss]')) {
     if (!confirm('Retirer de la liste ? Le fichier reste dans « _A trier ».')) return;
     await api(`api/review/${card.dataset.id}/dismiss`, {}); card.remove();
