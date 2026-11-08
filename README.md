@@ -44,6 +44,9 @@ Application « Public repository », build pack **Dockerfile**, port **8000**.
 | `MUSIC_PATH_TEMPLATE` | Modèle de chemin sous le dossier audio | `%albumartist%/%album%/$num(%track%,2) - %title%` |
 | `MUSIC_AUTO_CONFIDENCE` | Confiance minimale pour ranger automatiquement (sinon `_A trier`) | `0.85` |
 | `MUSIC_SINGLES_FOLDER` / `MUSIC_TO_SORT_FOLDER` | Noms des dossiers « sans album » et « à vérifier » | `Singles` / `_A trier` |
+| `ACOUSTID_API_KEY` | Reconnaissance par empreinte audio (morceaux mal titrés) | — |
+| `DISCOGS_TOKEN` | Identification de secours et genres/styles Discogs | — |
+| `LASTFM_API_KEY` | Genres d'après les tags Last.fm | — |
 | `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | Vérifie le jeton Cloudflare Access (recommandé) | — |
 | `API_TOKEN` | Jeton alternatif (`Authorization: Bearer …`) | — |
 

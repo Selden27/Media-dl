@@ -1,7 +1,7 @@
 FROM python:3.13-slim
 
-# ffmpeg: audio extraction / merging. deno: JS runtime yt-dlp needs for YouTube.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+# ffmpeg: audio extraction / merging. fpcalc (libchromaprint-tools): AcoustID fingerprints. deno: JS runtime yt-dlp needs for YouTube.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=denoland/deno:bin-2.9.8 /deno /usr/local/bin/deno
 

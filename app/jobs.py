@@ -12,7 +12,7 @@ import yt_dlp
 
 from yt_dlp.networking.impersonate import ImpersonateTarget # Ajout ***Olivier***
 
-from . import musicmeta, tagging
+from . import musicmeta, sources, tagging
 from .library import Library
 from .pcloud import PCloud
 
@@ -44,6 +44,14 @@ class JobManager:
         self.pool = ThreadPoolExecutor(max_workers=int(os.getenv("MAX_CONCURRENT", "2")))
         self.pcloud = PCloud.from_env()
         self.library = Library()
+        threading.Thread(target=self._self_test, daemon=True).start()
+
+    @staticmethod
+    def _self_test():
+        try:
+            sources.self_test()
+        except Exception as e:
+            sources.log.warning("sources de tags : test impossible (%s)", e)
 
     # -------------------------------------------------------------- public
     def submit(self, url, mode="audio", playlist=False, folder=None):
@@ -181,7 +189,7 @@ class JobManager:
             self._update(job_id, status="processing", progress=round((i - 1) / n * 100, 1),
                          message=f"{label}Recherche des tags…")
             try:
-                t = musicmeta.identify(entry, self.library)
+                t = musicmeta.identify(entry, self.library, path=path, auto_confidence=AUTO_CONFIDENCE)
             except Exception as e:  # MusicBrainz down, unexpected data…: keep what the site gave
                 h = musicmeta.hints_from_info(entry)
                 t = {"title": h["title"], "artist": h["artist"], "albumartist": h["artist"], "url": h["url"],

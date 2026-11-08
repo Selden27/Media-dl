@@ -33,7 +33,7 @@ Fichiers : `app/data/genres.txt` (liste) et `app/data/genre_map.txt` (correspond
 
 ## Étapes
 
-### Étape 1 : tags et rangement des nouveaux téléchargements
+### Étape 1 : tags et rangement des nouveaux téléchargements ✅ (livrée)
 - Identification : infos fournies par le site (yt-dlp), nettoyage du titre (« (Official Video) », « - Topic »…), recherche **MusicBrainz** (1 requête/s, sans clé).
 - Score de confiance : titre, artiste, durée, statut officiel, type de sortie (album > EP > single > compilation).
 - Tags ID3v2.3 avec mutagen : titre, artiste, artiste de l'album, album, piste/total, disque/total, année, genre, label, ISRC, compilation, identifiants MusicBrainz, lien d'origine en commentaire, pochette.
@@ -48,7 +48,7 @@ Fichiers : `app/data/genres.txt` (liste) et `app/data/genre_map.txt` (correspond
 - Suggestion d'un nouveau genre quand ≥ 2 sources s'accordent sur un même morceau, ou quand il revient sur 3 morceaux d'au moins 2 artistes. Trois choix : **Ajouter** / **Associer à un genre existant** / **Ignorer**. Section « Genres suggérés » pour les suggestions en attente.
 - Proposer la mise à jour des morceaux déjà enregistrés quand un genre est ajouté plus tard.
 
-### Étape 3 : genres et cas difficiles
+### Étape 3 : genres et cas difficiles ✅ (livrée)
 - **Discogs** (genres et styles) et **Last.fm** (tags) pour mieux suggérer le genre.
 - **AcoustID** (empreinte audio `fpcalc`) pour les titres mal nommés.
 - Clés à saisir dans Coolify : `ACOUSTID_API_KEY`, `DISCOGS_TOKEN`, `LASTFM_API_KEY`.

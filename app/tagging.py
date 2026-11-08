@@ -46,6 +46,8 @@ def write_tags(path, t):
                       ("MusicBrainz Release Track Id", "track_id"), ("MusicBrainz Album Type", "release_type")):
         if t.get(key):
             id3.add(TXXX(encoding=3, desc=desc, text=str(t[key]).lower() if key == "release_type" else str(t[key])))
+    if t.get("discogs_release_id"):
+        id3.add(TXXX(encoding=3, desc="DISCOGS_RELEASE_ID", text=str(t["discogs_release_id"])))
     if t.get("recording_id"):
         id3.add(UFID(owner="http://musicbrainz.org", data=t["recording_id"].encode()))
     if t.get("url"):
